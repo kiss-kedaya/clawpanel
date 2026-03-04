@@ -87,14 +87,13 @@ mod platform {
                 continue;
             }
             let trimmed = line.trim();
-            if trimmed.starts_with("pid = ") {
-                if let Ok(p) = trimmed["pid = ".len()..].trim().parse::<u32>() {
+            if let Some(rest) = trimmed.strip_prefix("pid = ") {
+                if let Ok(p) = rest.trim().parse::<u32>() {
                     pid = Some(p);
                 }
             }
-            if trimmed.starts_with("state = ") {
-                let state = trimmed["state = ".len()..].trim();
-                running = state == "running";
+            if let Some(rest) = trimmed.strip_prefix("state = ") {
+                running = rest.trim() == "running";
             }
         }
 
