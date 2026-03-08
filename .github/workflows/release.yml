@@ -137,6 +137,58 @@ jobs:
             echo "TAG_NAME=${{ github.ref_name }}" >> "$GITHUB_ENV"
           fi
 
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 构建前端并上传热更新包
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+
+          # 构建前端
+          npm ci
+          npm run build
+
+          # 打包 dist 目录为 zip
+          cd dist
+          zip -r "../web-${VERSION}.zip" .
+          cd ..
+
+          # 计算 SHA-256
+          HASH=$(sha256sum "web-${VERSION}.zip" | cut -d' ' -f1)
+          SIZE=$(stat -c%s "web-${VERSION}.zip" 2>/dev/null || stat -f%z "web-${VERSION}.zip")
+
+          # 上传为 Release Asset
+          gh release upload "$TAG_NAME" "web-${VERSION}.zip" --clobber
+
+          # 更新 docs/update/latest.json
+          DL_URL="https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/web-${VERSION}.zip"
+          cat > docs/update/latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "minAppVersion": "${VERSION}",
+            "hash": "sha256:${HASH}",
+            "url": "${DL_URL}",
+            "size": ${SIZE},
+            "changelog": "",
+            "releasedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+          # 去掉 heredoc 缩进
+          sed -i 's/^          //' docs/update/latest.json
+
+          # 提交 latest.json 到 main 分支
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/update/latest.json
+          git commit -m "ci: update latest.json for ${TAG_NAME}" || true
+          git push origin HEAD:main || true
+
       - name: 生成并更新 Release Notes
         shell: bash
         env:
