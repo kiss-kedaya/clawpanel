@@ -1,9 +1,9 @@
 {
   "version": "0.8.2",
-  "minAppVersion": "0.8.2",
+  "minAppVersion": "0.8.0",
   "hash": "sha256:79629912a4eb05cca161ba720d8fd8b8638c80f62084a7b190af8343dd4c6326",
   "url": "https://github.com/qingchencloud/clawpanel/releases/download/v0.8.2/web-0.8.2.zip",
   "size": 1990153,
-  "changelog": "",
+  "changelog": "15项修复 + 4项新功能：/v1拼接修复、SSH升级、飞书双插件、Linux sudo、渠道操作秒响应等",
   "releasedAt": "2026-03-12T16:16:27Z"
 }
