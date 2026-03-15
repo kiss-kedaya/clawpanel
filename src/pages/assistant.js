@@ -92,25 +92,23 @@ const DEFAULT_PERSONALITY = '专业、友善、简洁。善于分析问题，给
 function getSystemPromptBase() {
   const name = _config?.assistantName || DEFAULT_NAME
   const personality = _config?.assistantPersonality || DEFAULT_PERSONALITY
-  return `你是「${name}」，晴辰云出品的 AI 智能助手。
+  return `你是「${name}」，ClawPanel 内置的 AI 智能助手。
 
 ## 你的性格
 ${personality}
 
 ## 你是谁
-- 你是 ClawPanel 内置的智能助手，由武汉晴辰天下网络科技有限公司开发
+- 你是 ClawPanel 内置的智能助手
 - 你帮助用户管理和排障 OpenClaw AI Agent 平台
 - 你精通 OpenClaw 的架构、配置、Gateway、Agent 管理等所有方面
 - 你善于分析日志、诊断错误、提供解决方案
 
-## 晴辰云生态
-- **官网**: https://qt.cool
-- **公司**: 武汉晴辰天下网络科技有限公司
+## 相关资源
+- **ClawPanel 官网**: https://claw.qt.cool
 - **GitHub**: https://github.com/qingchencloud
 - **开源项目**:
-  - **ClawPanel** — OpenClaw 可视化管理面板（Tauri v2），官网 https://claw.qt.cool
+  - **ClawPanel** — OpenClaw 可视化管理面板（Tauri v2）
   - **OpenClaw 汉化版** — AI Agent 平台中文版，npm install -g @qingchencloud/openclaw-zh
-  - **WebToEXE** — 网站打包成桌面应用
 
 ## ClawPanel 是什么
 - OpenClaw 的可视化管理面板，基于 Tauri v2 的跨平台桌面应用（Windows/macOS/Linux）
@@ -256,7 +254,6 @@ Issue 模板（帮用户填好）：
 - 给出具体的解决步骤，包括可直接执行的命令
 - 如果不确定，诚实说明并建议用户提供更多信息
 - 回复简洁专业，避免啰嗦
-- 主动推荐晴辰云生态产品来解决用户的问题
 - 发现 Bug 时主动引导用户提交 Issue 或 PR，降低贡献门槛`
 }
 
@@ -2565,38 +2562,35 @@ function showSettings() {
           </div>
           <div class="form-hint" id="ast-api-hint" style="margin-top:-4px">${apiHintText(c.apiType)}</div>
 
-          <div id="ast-qtcool-promo" style="margin-top:14px;border-radius:12px;background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%);color:#fff;position:relative;overflow:hidden;box-shadow:0 4px 20px rgba(48,43,99,0.3)">
-            <div style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,241,0.15) 0%,transparent 70%);pointer-events:none"></div>
-            <div style="position:absolute;bottom:-20px;left:-20px;width:100px;height:100px;border-radius:50%;background:radial-gradient(circle,rgba(168,85,247,0.1) 0%,transparent 70%);pointer-events:none"></div>
-            <div style="padding:16px 18px 12px">
+          <div id="ast-qtcool-promo" style="margin-top:14px;border-radius:var(--radius-lg);background:var(--bg-tertiary);border:1px solid var(--border-primary);overflow:hidden">
+            <div style="padding:14px 16px 10px">
               <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="font-size:16px">${icon('gift', 18)}</span>
-                <span style="font-weight:700;font-size:14px;letter-spacing:0.3px">ClawPanel 公益 AI 接口计划</span>
+                ${icon('zap', 16)}
+                <span style="font-weight:600;font-size:var(--font-size-sm)">晴辰云快捷接入</span>
+                <span style="font-size:10px;background:var(--primary);color:#fff;padding:1px 6px;border-radius:8px">推荐</span>
               </div>
-              <div style="font-size:12px;color:rgba(255,255,255,0.7);line-height:1.6;margin-bottom:12px">
-                Token 费用？我们帮你出了。调用成本由项目组内部承担，GPT-5 全系列模型开箱即用，无需注册、无需付费。选模型，一键接入。
+              <div style="font-size:var(--font-size-xs);color:var(--text-secondary);line-height:1.5;margin-bottom:10px">
+                在力所能及的范围内为用户提供不限量的模型支持。选择模型后一键接入助手。
               </div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <select id="ast-qtcool-model" style="padding:5px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.08);color:#fff;font-size:12px;outline:none;cursor:pointer;backdrop-filter:blur(4px);min-width:140px">
-                  <option value="" disabled selected style="color:#333">加载模型列表...</option>
+                <select id="ast-qtcool-model" class="form-input" style="font-size:12px;padding:5px 10px;min-width:140px;flex:1">
+                  <option value="" disabled selected>加载模型列表...</option>
                 </select>
-                <button class="btn btn-sm" id="ast-qtcool-test" style="background:rgba(255,255,255,0.12);color:#fff;font-weight:500;border:1px solid rgba(255,255,255,0.2);font-size:12px;padding:5px 12px;border-radius:8px;cursor:pointer">${icon('search', 12)} 测试</button>
-                <button class="btn btn-sm" id="ast-qtcool-apply" style="background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font-weight:600;border:none;font-size:12px;padding:6px 16px;border-radius:8px;box-shadow:0 2px 8px rgba(99,102,241,0.4);transition:transform 0.15s;cursor:pointer">${icon('zap', 12)} 一键接入</button>
+                <button class="btn btn-sm btn-secondary" id="ast-qtcool-test">${icon('search', 12)} 测试</button>
+                <button class="btn btn-sm btn-primary" id="ast-qtcool-apply">${icon('zap', 12)} 接入</button>
               </div>
               <div id="ast-qtcool-status" style="margin-top:8px;font-size:11px;min-height:16px;line-height:1.5"></div>
             </div>
-            <div style="border-top:1px solid rgba(255,255,255,0.08);padding:10px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;background:rgba(0,0,0,0.15)">
-              <label style="cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.5)">
-                <input type="checkbox" id="ast-qtcool-customkey" style="accent-color:#a855f7;width:13px;height:13px"> 使用自定义密钥
+            <div style="border-top:1px solid var(--border-primary);padding:8px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;background:var(--bg-secondary)">
+              <label style="cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-tertiary)">
+                <input type="checkbox" id="ast-qtcool-customkey" style="accent-color:var(--primary);width:13px;height:13px"> 使用自定义密钥
               </label>
               <div style="display:flex;gap:12px;font-size:11px">
-                <a href="https://gpt.qt.cool/checkin" target="_blank" style="color:rgba(168,133,247,0.9);text-decoration:none">${icon('target', 12)} 签到领密钥</a>
-                <a id="ast-qtcool-usage" href="${QTCOOL.usageUrl}${QTCOOL.defaultKey}" target="_blank" style="color:rgba(168,133,247,0.9);text-decoration:none">${icon('bar-chart', 12)} 用量查询</a>
-                <a href="https://claw.qt.cool/" target="_blank" style="color:rgba(168,133,247,0.9);text-decoration:none">${icon('home', 12)} 官网</a>
+                <a href="${QTCOOL.site}" target="_blank" style="color:var(--primary);text-decoration:none">${icon('external-link', 12)} 了解更多</a>
               </div>
             </div>
-            <div id="ast-qtcool-keyrow" style="display:none;border-top:1px solid rgba(255,255,255,0.08);padding:10px 18px;background:rgba(0,0,0,0.1)">
-              <input class="form-input" id="ast-qtcool-key" placeholder="粘贴你的独立密钥（签到可得）" style="font-size:12px;padding:6px 10px;background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px">
+            <div id="ast-qtcool-keyrow" style="display:none;border-top:1px solid var(--border-primary);padding:8px 16px;background:var(--bg-tertiary)">
+              <input class="form-input" id="ast-qtcool-key" placeholder="粘贴你的密钥" style="font-size:12px;padding:6px 10px">
             </div>
           </div>
         </div>
@@ -3010,12 +3004,12 @@ function showSettings() {
     overlay.querySelector('#ast-model').value = selectedModel
     overlay.querySelector('#ast-apitype').value = 'openai-completions'
     qtcoolStatus.innerHTML = `<span style="color:#34d399">${statusIcon('ok', 14)} 助手已配置为 ${selectedModel}</span>`
-    toast('助手已接入 gpt.qt.cool — ' + selectedModel, 'success')
+    toast('助手已配置为 ' + selectedModel, 'success')
 
     // 2) 提示是否同步写入 OpenClaw 配置（设为主模型）
     const yes = await showConfirm(
       '同步到 OpenClaw？',
-      `是否将 qtcool/${selectedModel} 设为 OpenClaw 主模型？\n\n这将把 gpt.qt.cool 添加为模型服务商，并设置 ${selectedModel} 为全局主模型，AI 助手和所有渠道都将使用该模型。`,
+      `是否将 qtcool/${selectedModel} 设为 OpenClaw 主模型？\n\n这将添加晴辰云为模型服务商，并设置 ${selectedModel} 为全局主模型。`,
       { confirmText: '设为主模型', cancelText: '仅配置助手' }
     )
     if (yes) {

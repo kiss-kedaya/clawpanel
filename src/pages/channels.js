@@ -178,14 +178,19 @@ function renderConfigured(page, state) {
           const label = reg?.label || p.id
           const ic = icon(reg?.iconName || 'radio', 22)
           const channelKey = getChannelBindingKey(p.id)
-          const binding = (state.bindings || []).find(b => b.match?.channel === channelKey)
-          const boundAgent = binding?.agentId || 'main'
+          const allBindings = (state.bindings || []).filter(b => b.match?.channel === channelKey)
+          const boundAgents = allBindings.map(b => b.agentId || 'main')
+          // 只有一个 main 绑定时不显示标签（默认行为），多绑定时全部显示
+          const showAll = boundAgents.length > 1 || (boundAgents.length === 1 && boundAgents[0] !== 'main')
+          const agentBadges = showAll ? boundAgents.map(a =>
+            `<span style="font-size:var(--font-size-xs);color:var(--accent);background:var(--accent-muted);padding:1px 6px;border-radius:10px;white-space:nowrap">→ ${escapeAttr(a)}</span>`
+          ).join(' ') : ''
           return `
             <div class="platform-card ${p.enabled ? 'active' : 'inactive'}" data-pid="${p.id}">
               <div class="platform-card-header">
                 <span class="platform-emoji">${ic}</span>
                 <span class="platform-name">${label}</span>
-                ${boundAgent !== 'main' ? `<span style="font-size:var(--font-size-xs);color:var(--accent);background:var(--accent-muted);padding:1px 6px;border-radius:10px">→ ${escapeAttr(boundAgent)}</span>` : ''}
+                ${agentBadges}
                 <span class="platform-status-dot ${p.enabled ? 'on' : 'off'}"></span>
               </div>
               <div class="platform-card-actions">
@@ -244,8 +249,64 @@ function renderAvailable(page, state) {
   }).join('')
 
   el.querySelectorAll('.platform-pick').forEach(btn => {
-    btn.onclick = () => openConfigDialog(btn.dataset.pid, page, state)
+    const pid = btn.dataset.pid
+    const done = configuredIds.has(pid)
+    btn.onclick = () => done ? openBindAgentDialog(pid, page, state) : openConfigDialog(pid, page, state)
   })
+}
+
+// ── 快速绑定 Agent 弹窗（已接入平台专用） ──
+
+async function openBindAgentDialog(pid, page, state) {
+  const reg = PLATFORM_REGISTRY[pid]
+  if (!reg) return
+  let agents = []
+  try { agents = await api.listAgents() } catch {}
+  if (!Array.isArray(agents)) agents = []
+
+  const channelKey = getChannelBindingKey(pid)
+  const existingBindings = (state.bindings || []).filter(b => b.match?.channel === channelKey)
+  const boundIds = new Set(existingBindings.map(b => b.agentId || 'main'))
+
+  const availableAgents = agents.filter(a => !boundIds.has(a.id))
+  if (!availableAgents.length) {
+    toast('所有 Agent 都已绑定到该渠道', 'info')
+    return
+  }
+
+  const agentOptions = availableAgents.map(a => {
+    const label = a.identityName ? a.identityName.split(',')[0].trim() : a.id
+    return `<option value="${escapeAttr(a.id)}">${a.id}${a.id !== label ? ' — ' + label : ''}</option>`
+  }).join('')
+
+  const modal = showContentModal({
+    title: `为 ${reg.label} 绑定新 Agent`,
+    content: `
+      <div style="margin-bottom:var(--space-md)">
+        <div class="form-hint" style="margin-bottom:var(--space-sm)">已绑定: ${[...boundIds].join(', ') || '无'}</div>
+        <label class="form-label">选择要绑定的 Agent</label>
+        <select class="form-input" id="bind-agent-select">${agentOptions}</select>
+        <div class="form-hint" style="margin-top:4px">该渠道的消息将路由到选中的 Agent 处理</div>
+      </div>
+    `,
+    buttons: [
+      { label: '绑定', className: 'btn btn-primary', id: 'btn-bind-agent' },
+    ],
+    width: 400,
+  })
+
+  modal.querySelector('#btn-bind-agent').onclick = async () => {
+    const agentId = modal.querySelector('#bind-agent-select')?.value
+    if (!agentId) { toast('请选择 Agent', 'warning'); return }
+    try {
+      await saveChannelBinding(pid, agentId)
+      toast(`已将 ${reg.label} 绑定到 Agent「${agentId}」`, 'success')
+      modal.close?.() || modal.remove?.()
+      await loadPlatforms(page, state)
+    } catch (e) {
+      toast('绑定失败: ' + e, 'error')
+    }
+  }
 }
 
 // ── 配置弹窗（新增 / 编辑共用） ──
@@ -287,7 +348,16 @@ async function openConfigDialog(pid, page, state) {
     const label = a.identityName ? a.identityName.split(',')[0].trim() : a.id
     return `<option value="${escapeAttr(a.id)}" ${a.id === currentBinding ? 'selected' : ''}>${a.id}${a.id !== label ? ' — ' + label : ''}</option>`
   }).join('')
+  const supportsMultiAccount = ['feishu', 'dingtalk', 'dingtalk-connector'].includes(pid)
+  const accountIdHtml = supportsMultiAccount ? `
+    <div class="form-group">
+      <label class="form-label">账号标识（多账号模式）</label>
+      <input class="form-input" name="__accountId" placeholder="如 sales、support（留空则为默认账号）" value="">
+      <div class="form-hint">为同一平台接入多个应用时，每个应用需要一个唯一的账号标识。不同账号可绑定不同 Agent</div>
+    </div>
+  ` : ''
   const agentBindingHtml = `
+    ${accountIdHtml}
     <div class="form-group">
       <label class="form-label">绑定 Agent</label>
       <select class="form-input" name="__agentBinding">
@@ -590,14 +660,15 @@ async function openConfigDialog(pid, page, state) {
         }
       }
 
-      // 写入配置
+      // 写入配置（多账号模式传 accountId）
       btnSave.textContent = '写入配置...'
-      await api.saveMessagingPlatform(pid, form)
+      const accountId = modal.querySelector('input[name="__accountId"]')?.value?.trim() || null
+      await api.saveMessagingPlatform(pid, form, accountId)
 
-      // 写入 Agent 绑定到 openclaw.json bindings
+      // 写入 Agent 绑定到 openclaw.json bindings（多账号时 binding.match 包含 accountId）
       const selectedAgent = modal.querySelector('select[name="__agentBinding"]')?.value || ''
       try {
-        await saveChannelBinding(pid, selectedAgent)
+        await saveChannelBinding(pid, selectedAgent, null, accountId)
       } catch (e) {
         console.warn('[channels] 保存 Agent 绑定失败:', e)
       }
@@ -631,24 +702,33 @@ function getChannelBindingKey(pid) {
  * 支持同一渠道多个 Agent 绑定（不同 agentId）
  * oldAgentId: 编辑时替换老绑定
  */
-async function saveChannelBinding(pid, agentId, oldAgentId) {
+async function saveChannelBinding(pid, agentId, oldAgentId, accountId) {
   const config = await api.readOpenclawConfig()
   if (!config) return
   const channelKey = getChannelBindingKey(pid)
   let bindings = Array.isArray(config.bindings) ? [...config.bindings] : []
 
-  // 编辑模式：移除旧绑定（按 channel + oldAgentId）
-  if (oldAgentId) {
-    bindings = bindings.filter(b => !(b.match?.channel === channelKey && (b.agentId || 'main') === oldAgentId))
+  // 构建匹配条件
+  const matchesBinding = (b) => {
+    if (b.match?.channel !== channelKey) return false
+    if (accountId) return (b.match?.accountId || '') === accountId
+    return !b.match?.accountId
   }
 
-  // 避免重复：如果已有相同 channel+agentId 的绑定，先移除
-  const effectiveAgent = agentId || 'main'
-  bindings = bindings.filter(b => !(b.match?.channel === channelKey && (b.agentId || 'main') === effectiveAgent))
+  // 编辑模式：移除旧绑定
+  if (oldAgentId) {
+    bindings = bindings.filter(b => !(matchesBinding(b) && (b.agentId || 'main') === oldAgentId))
+  }
 
-  // 添加新绑定（main 也明确写入，方便 UI 展示）
-  if (agentId && agentId !== 'main') {
-    bindings.push({ match: { channel: channelKey }, agentId })
+  // 避免重复
+  const effectiveAgent = agentId || 'main'
+  bindings = bindings.filter(b => !(matchesBinding(b) && (b.agentId || 'main') === effectiveAgent))
+
+  // 添加新绑定（包含 accountId 用于多账号路由）
+  if (agentId) {
+    const match = { channel: channelKey }
+    if (accountId) match.accountId = accountId
+    bindings.push({ agentId, match })
   }
 
   config.bindings = bindings

@@ -25,29 +25,20 @@ export async function render() {
       服务商是模型的来源（如 OpenAI、DeepSeek 等）。每个服务商下可添加多个模型。
       标记为「主模型」的将优先使用，其余作为备选自动切换。配置修改后自动保存。
     </div>
-    <div id="qtcool-promo" style="margin-bottom:var(--space-lg);border-radius:12px;background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%);color:#fff;position:relative;overflow:hidden;box-shadow:0 4px 24px rgba(48,43,99,0.25)">
-      <div style="position:absolute;top:-50px;right:-50px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(99,102,241,0.12) 0%,transparent 70%);pointer-events:none"></div>
-      <div style="position:absolute;bottom:-30px;left:20px;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(168,85,247,0.08) 0%,transparent 70%);pointer-events:none"></div>
-      <div style="padding:20px 24px 16px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px">
-        <div style="flex:1;min-width:240px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <span style="font-size:20px">${icon('gift', 22)}</span>
-            <span style="font-weight:700;font-size:16px;letter-spacing:0.3px">晴辰云 AI 接口</span>
-            <span style="font-size:10px;background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:10px;font-weight:600">官方</span>
-          </div>
-          <div style="font-size:13px;color:rgba(255,255,255,0.65);line-height:1.7">
-            每日签到送免费额度 · 邀请好友送余额 · 充值最低 3 折消耗 · 未消耗余额随时包退<br>
-            GPT-5 全系列模型开箱即用，更多主流模型持续接入中。OpenAI 兼容接口，一键配置
-          </div>
+    <div id="qtcool-promo" style="margin-bottom:var(--space-md);border-radius:var(--radius-lg);background:var(--bg-secondary);border:1px solid var(--border-primary);padding:14px 18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+      <div style="flex:1;min-width:200px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          ${icon('zap', 16)}
+          <span style="font-weight:600;font-size:var(--font-size-sm)">晴辰云</span>
+          <span style="font-size:10px;background:var(--primary);color:#fff;padding:1px 6px;border-radius:8px">推荐</span>
         </div>
-        <div style="display:flex;flex-direction:column;gap:10px;align-items:flex-end">
-          <button class="btn btn-sm" id="btn-qtcool-oneclick" style="background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font-weight:600;border:none;padding:8px 22px;font-size:13px;white-space:nowrap;border-radius:8px;box-shadow:0 2px 12px rgba(99,102,241,0.4);cursor:pointer;transition:transform 0.15s">${icon('zap', 14)} 一键添加全部模型</button>
-          <div style="display:flex;gap:14px;font-size:11px">
-            <a href="https://gpt.qt.cool/checkin" target="_blank" style="color:rgba(168,133,247,0.9);text-decoration:none">${icon('target', 12)} 签到领密钥</a>
-            <a href="${QTCOOL.usageUrl}${QTCOOL.defaultKey}" target="_blank" style="color:rgba(168,133,247,0.9);text-decoration:none">${icon('bar-chart', 12)} 用量查询</a>
-            <a href="https://claw.qt.cool/" target="_blank" style="color:rgba(168,133,247,0.9);text-decoration:none">${icon('home', 12)} 官网</a>
-          </div>
+        <div style="font-size:var(--font-size-xs);color:var(--text-secondary);line-height:1.5">
+          在力所能及的范围内为用户提供不限量的模型支持，动态获取最新可用模型列表
         </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <button class="btn btn-primary btn-sm" id="btn-qtcool-oneclick">${icon('plus', 14)} 获取模型列表</button>
+        <a href="${QTCOOL.site}" target="_blank" class="btn btn-secondary btn-sm">${icon('external-link', 12)} 了解更多</a>
       </div>
     </div>
     <div id="default-model-bar"></div>
@@ -721,18 +712,17 @@ function bindTopActions(page, state) {
   page.querySelector('#btn-add-provider').onclick = () => addProvider(page, state)
   page.querySelector('#btn-undo').onclick = () => undo(page, state)
 
-  // gpt.qt.cool 一键添加（动态获取模型列表）
+  // 晴辰云：获取模型列表 → 弹窗让用户选择要添加的模型
   page.querySelector('#btn-qtcool-oneclick').onclick = async () => {
     if (!state.config) { toast('配置未加载完成，请稍候', 'warning'); return }
 
     const btn = page.querySelector('#btn-qtcool-oneclick')
-    btn.textContent = '获取模型列表...'
+    btn.textContent = '获取中...'
     btn.disabled = true
 
-    // 动态获取模型列表（共享逻辑）
     const models = await fetchQtcoolModels()
 
-    btn.innerHTML = `${icon('zap', 14)} 一键添加全部模型`
+    btn.innerHTML = `${icon('plus', 14)} 获取模型列表`
     btn.disabled = false
 
     if (!models.length) {
@@ -740,40 +730,81 @@ function bindTopActions(page, state) {
       return
     }
 
-    pushUndo(state)
-    if (!state.config.models) state.config.models = {}
-    if (!state.config.models.providers) state.config.models.providers = {}
+    // 已有的模型 ID
+    const existingProvider = (state.config.models?.providers || {})[QTCOOL.providerKey]
+    const existingIds = new Set((existingProvider?.models || []).map(m => typeof m === 'string' ? m : m.id))
 
-    const existing = state.config.models.providers[QTCOOL.providerKey]
-    if (existing) {
-      const existingIds = new Set((existing.models || []).map(m => typeof m === 'string' ? m : m.id))
-      let added = 0
-      for (const m of models) {
-        if (!existingIds.has(m.id)) {
-          existing.models.push({ ...m })
-          added++
-        }
-      }
-      toast(added ? `已添加 ${added} 个新模型到 qtcool` : 'qtcool 模型已是最新', added ? 'success' : 'info')
-    } else {
-      state.config.models.providers[QTCOOL.providerKey] = {
-        baseUrl: QTCOOL.baseUrl,
-        apiKey: QTCOOL.defaultKey,
-        api: QTCOOL.api,
-        models: models.map(m => ({ ...m })),
-      }
-      if (!getCurrentPrimary(state.config)) {
-        if (!state.config.agents) state.config.agents = {}
-        if (!state.config.agents.defaults) state.config.agents.defaults = {}
-        if (!state.config.agents.defaults.model) state.config.agents.defaults.model = {}
-        state.config.agents.defaults.model.primary = QTCOOL.providerKey + '/' + models[0].id
-      }
-      toast('已添加 gpt.qt.cool（' + models.length + ' 个模型）', 'success')
+    // 弹窗让用户勾选要添加的模型
+    const overlay = document.createElement('div')
+    overlay.className = 'modal-overlay'
+    overlay.innerHTML = `
+      <div class="modal" style="max-height:80vh;overflow-y:auto">
+        <div class="modal-title">选择要添加的模型</div>
+        <div class="form-hint" style="margin-bottom:12px">从晴辰云获取到 ${models.length} 个可用模型，勾选需要的模型后点击添加。</div>
+        <div style="margin-bottom:12px;display:flex;gap:8px">
+          <button class="btn btn-sm btn-secondary" id="qtsel-all">全选</button>
+          <button class="btn btn-sm btn-secondary" id="qtsel-none">全不选</button>
+        </div>
+        <div id="qtmodel-list" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;padding-right:4px">
+          ${models.map(m => {
+            const already = existingIds.has(m.id)
+            return `<label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--radius-md);cursor:pointer;background:var(--bg-tertiary);opacity:${already ? '0.5' : '1'}">
+              <input type="checkbox" value="${m.id}" ${already ? 'disabled title="已添加"' : 'checked'} style="accent-color:var(--primary)">
+              <span style="font-size:var(--font-size-sm);flex:1">${m.id}</span>
+              ${already ? '<span style="font-size:10px;color:var(--text-tertiary)">已有</span>' : ''}
+            </label>`
+          }).join('')}
+        </div>
+        <div class="modal-actions" style="margin-top:16px">
+          <button class="btn btn-primary" id="qtsel-confirm">${icon('plus', 14)} 添加选中模型</button>
+          <button class="btn btn-secondary" id="qtsel-cancel">取消</button>
+        </div>
+      </div>
+    `
+    document.body.appendChild(overlay)
+    overlay.querySelector('#qtsel-cancel').onclick = () => overlay.remove()
+    overlay.querySelector('#qtsel-all').onclick = () => {
+      overlay.querySelectorAll('#qtmodel-list input:not(:disabled)').forEach(cb => cb.checked = true)
     }
-    renderProviders(page, state)
-    renderDefaultBar(page, state)
-    updateUndoBtn(page, state)
-    autoSave(state)
+    overlay.querySelector('#qtsel-none').onclick = () => {
+      overlay.querySelectorAll('#qtmodel-list input:not(:disabled)').forEach(cb => cb.checked = false)
+    }
+    overlay.querySelector('#qtsel-confirm').onclick = () => {
+      const selected = [...overlay.querySelectorAll('#qtmodel-list input:checked:not(:disabled)')].map(cb => cb.value)
+      overlay.remove()
+      if (!selected.length) { toast('未选择任何模型', 'info'); return }
+
+      pushUndo(state)
+      if (!state.config.models) state.config.models = {}
+      if (!state.config.models.providers) state.config.models.providers = {}
+
+      const selectedModels = models.filter(m => selected.includes(m.id))
+      if (existingProvider) {
+        let added = 0
+        for (const m of selectedModels) {
+          if (!existingIds.has(m.id)) { existingProvider.models.push({ ...m }); added++ }
+        }
+        toast(added ? `已添加 ${added} 个模型` : '所选模型均已存在', added ? 'success' : 'info')
+      } else {
+        state.config.models.providers[QTCOOL.providerKey] = {
+          baseUrl: QTCOOL.baseUrl,
+          apiKey: QTCOOL.defaultKey,
+          api: QTCOOL.api,
+          models: selectedModels.map(m => ({ ...m })),
+        }
+        if (!getCurrentPrimary(state.config) && selectedModels.length) {
+          if (!state.config.agents) state.config.agents = {}
+          if (!state.config.agents.defaults) state.config.agents.defaults = {}
+          if (!state.config.agents.defaults.model) state.config.agents.defaults.model = {}
+          state.config.agents.defaults.model.primary = QTCOOL.providerKey + '/' + selectedModels[0].id
+        }
+        toast(`已添加晴辰云（${selectedModels.length} 个模型）`, 'success')
+      }
+      renderProviders(page, state)
+      renderDefaultBar(page, state)
+      updateUndoBtn(page, state)
+      autoSave(state)
+    }
   }
 }
 

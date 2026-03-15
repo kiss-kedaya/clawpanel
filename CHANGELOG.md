@@ -5,6 +5,36 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.9.2] - 2026-03-16
+
+### 新功能 (Features)
+
+- **SkillHub + ClawHub 双源技能管理** — Skills 页面新增已安装/搜索安装 Tab 切换，支持 SkillHub 和 ClawHub 双源下拉选择、搜索安装、卸载功能
+- **SkillHub CLI 集成** — 新增 SkillHub 检测、安装、搜索、安装 Skill 的完整后端命令链（Rust + Web 双模式）
+- **消息渠道多 Agent 绑定展示** — 已接入列表现在显示所有绑定的 Agent 标签，不再只显示第一个
+- **消息渠道快速绑定 Agent** — 已接入平台点击"绑定新 Agent"弹出简化的 Agent 选择弹窗，无需重新填写凭证
+- **消息渠道多账号支持（飞书）** — 后端 save_messaging_platform 支持 accountId 参数，可将不同飞书应用绑定到不同 Agent
+- **NVM_SYMLINK 环境变量支持** — Windows 下 nvm 用户的 Node.js 路径检测更可靠
+
+### 修复 (Fixes)
+
+- **Skills JSON 解析修复** — extractCliJson 函数正确处理 CLI 输出中混入的 Node.js 警告信息
+- **`--verbose` 日志污染** — 移除 openclaw skills 命令中多余的 --verbose 参数，避免输出被 npm 日志污染
+- **SkillHub 搜索结果解析** — 修复实际 CLI 输出格式与预期不符导致的搜索结果为空
+- **Windows cmd /c 兼容** — SkillHub/npx/ClawHub 命令在 Windows 上正确通过 cmd /c 调用
+- **Cron delivery 参数格式** — 定时任务投递参数修复为正确的 mode+to+channel 格式
+- **白屏安全网** — boot() 增加 try-catch 和 splash 超时检测，WebView2 加载失败时不再白屏
+
+### 改进 (Improvements)
+
+- **Git HTTPS 重写规则扩展** — 从 6 条扩展到 14 条，覆盖 GitHub/GitLab/Bitbucket 的所有 SSH/Git 协议变体
+- **Agent 管理直接读 openclaw.json** — 不再通过 CLI 获取 Agent 列表，响应速度大幅提升
+- **记忆文件直接读 openclaw.json** — Agent workspace 路径从配置文件直接解析，避免 CLI 调用阻塞
+- **NSIS 中文语言选择器** — Windows 安装包默认中文，支持语言选择
+- **WebView2 内嵌引导安装** — NSIS 安装包内嵌 WebView2 bootstrapper，离线环境也能安装
+- **模型添加体验优化** — 模型页面快捷添加改为模型选择弹窗，用户可自主勾选需要的模型
+- **助手系统提示词精简** — 移除冗余信息，聚焦技术支持核心能力
+
 ## [0.8.6] - 2026-03-13
 
 ### 修复 (Fixes)

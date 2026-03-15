@@ -31,13 +31,26 @@ impl Drop for GuardianPause {
 
 /// 预设 npm 源列表
 const DEFAULT_REGISTRY: &str = "https://registry.npmmirror.com";
-const GIT_HTTPS_REWRITES: [&str; 6] = [
-    "ssh://git@github.com/",
-    "ssh://git@github.com",
-    "ssh://git@://github.com/",
-    "git@github.com:",
-    "git://github.com/",
-    "git+ssh://git@github.com/",
+/// (target_https_prefix, from_pattern) pairs for Git HTTPS rewriting.
+/// Each entry maps a non-HTTPS Git URL pattern to the corresponding HTTPS URL.
+const GIT_HTTPS_REWRITES: &[(&str, &str)] = &[
+    // github.com
+    ("https://github.com/", "ssh://git@github.com/"),
+    ("https://github.com/", "ssh://git@github.com"),
+    ("https://github.com/", "ssh://git@://github.com/"),
+    ("https://github.com/", "git@github.com:"),
+    ("https://github.com/", "git://github.com/"),
+    ("https://github.com/", "git+ssh://git@github.com/"),
+    // gitlab.com
+    ("https://gitlab.com/", "ssh://git@gitlab.com/"),
+    ("https://gitlab.com/", "git@gitlab.com:"),
+    ("https://gitlab.com/", "git://gitlab.com/"),
+    ("https://gitlab.com/", "git+ssh://git@gitlab.com/"),
+    // bitbucket.org
+    ("https://bitbucket.org/", "ssh://git@bitbucket.org/"),
+    ("https://bitbucket.org/", "git@bitbucket.org:"),
+    ("https://bitbucket.org/", "git://bitbucket.org/"),
+    ("https://bitbucket.org/", "git+ssh://git@bitbucket.org/"),
 ];
 
 #[derive(Debug, Deserialize, Default)]
@@ -114,27 +127,23 @@ fn recommended_version_for(source: &str) -> Option<String> {
 }
 
 fn configure_git_https_rules() -> usize {
-    let mut unset = Command::new("git");
-    unset.args([
-        "config",
-        "--global",
-        "--unset-all",
-        "url.https://github.com/.insteadOf",
-    ]);
-    #[cfg(target_os = "windows")]
-    unset.creation_flags(0x08000000);
-    let _ = unset.output();
+    // Collect unique target prefixes to unset old rules
+    let targets: std::collections::HashSet<&str> =
+        GIT_HTTPS_REWRITES.iter().map(|(t, _)| *t).collect();
+    for target in &targets {
+        let key = format!("url.{target}.insteadOf");
+        let mut unset = Command::new("git");
+        unset.args(["config", "--global", "--unset-all", &key]);
+        #[cfg(target_os = "windows")]
+        unset.creation_flags(0x08000000);
+        let _ = unset.output();
+    }
 
     let mut success = 0;
-    for from in GIT_HTTPS_REWRITES {
+    for (target, from) in GIT_HTTPS_REWRITES {
+        let key = format!("url.{target}.insteadOf");
         let mut cmd = Command::new("git");
-        cmd.args([
-            "config",
-            "--global",
-            "--add",
-            "url.https://github.com/.insteadOf",
-            from,
-        ]);
+        cmd.args(["config", "--global", "--add", &key, from]);
         #[cfg(target_os = "windows")]
         cmd.creation_flags(0x08000000);
         if cmd.output().map(|o| o.status.success()).unwrap_or(false) {
@@ -153,12 +162,12 @@ fn apply_git_install_env(cmd: &mut Command) {
         )
         .env("GIT_ALLOW_PROTOCOL", "https:http:file");
     cmd.env("GIT_CONFIG_COUNT", GIT_HTTPS_REWRITES.len().to_string());
-    for (idx, from) in GIT_HTTPS_REWRITES.iter().enumerate() {
+    for (idx, (target, from)) in GIT_HTTPS_REWRITES.iter().enumerate() {
         cmd.env(
             format!("GIT_CONFIG_KEY_{idx}"),
-            "url.https://github.com/.insteadOf",
+            format!("url.{target}.insteadOf"),
         )
-        .env(format!("GIT_CONFIG_VALUE_{idx}"), from);
+        .env(format!("GIT_CONFIG_VALUE_{idx}"), *from);
     }
 }
 

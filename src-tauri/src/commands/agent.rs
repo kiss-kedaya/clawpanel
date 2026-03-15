@@ -4,29 +4,86 @@ use serde_json::Value;
 use std::fs;
 use std::io::Write;
 
-/// 获取 agent 列表
+/// 获取 agent 列表（直接读 openclaw.json，不走 CLI，毫秒级响应）
 #[tauri::command]
 pub async fn list_agents() -> Result<Value, String> {
-    let output = openclaw_command_async()
-        .args(["agents", "list", "--json"])
-        .output()
-        .await
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "OpenClaw CLI 未找到，请确认已安装并重启 ClawPanel。\n如果使用 nvm 安装，请从终端启动 ClawPanel。".to_string()
-            } else {
-                format!("执行失败: {e}")
-            }
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("获取 Agent 列表失败: {stderr}"));
+    let config_path = super::openclaw_dir().join("openclaw.json");
+    if !config_path.exists() {
+        return Err("openclaw.json 不存在，请先安装 OpenClaw".to_string());
     }
+    let content = fs::read_to_string(&config_path).map_err(|e| format!("读取配置失败: {e}"))?;
+    let config: Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析 JSON 失败: {e}"))?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    crate::commands::skills::extract_json_pub(&stdout)
-        .ok_or_else(|| "解析 JSON 失败: 输出中未找到有效 JSON".to_string())
+    let agents_list = config
+        .get("agents")
+        .and_then(|a| a.get("list"))
+        .and_then(|l| l.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // 补全 main agent 的 workspace（config 中可能没有显式指定）
+    let default_workspace = config
+        .get("agents")
+        .and_then(|a| a.get("defaults"))
+        .and_then(|d| d.get("workspace"))
+        .and_then(|w| w.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            super::openclaw_dir()
+                .join("workspace")
+                .to_string_lossy()
+                .to_string()
+        });
+
+    let enriched: Vec<Value> = agents_list
+        .into_iter()
+        .map(|mut agent| {
+            let id = agent
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            // 补全 workspace 路径
+            if agent.get("workspace").and_then(|w| w.as_str()).is_none()
+                || agent.get("workspace").and_then(|w| w.as_str()) == Some("")
+            {
+                if id == "main" {
+                    agent.as_object_mut().map(|o| {
+                        o.insert(
+                            "workspace".to_string(),
+                            Value::String(default_workspace.clone()),
+                        )
+                    });
+                } else {
+                    let ws = super::openclaw_dir()
+                        .join("agents")
+                        .join(&id)
+                        .join("workspace")
+                        .to_string_lossy()
+                        .to_string();
+                    agent
+                        .as_object_mut()
+                        .map(|o| o.insert("workspace".to_string(), Value::String(ws)));
+                }
+            }
+            // 补全 identityName 用于前端显示
+            let identity_name = agent
+                .get("identity")
+                .and_then(|i| i.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !identity_name.is_empty() {
+                agent
+                    .as_object_mut()
+                    .map(|o| o.insert("identityName".to_string(), Value::String(identity_name)));
+            }
+            agent
+        })
+        .collect();
+
+    Ok(Value::Array(enriched))
 }
 
 /// 创建新 agent

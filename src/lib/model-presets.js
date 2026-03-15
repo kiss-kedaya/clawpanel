@@ -11,9 +11,9 @@ export const API_TYPES = [
   { value: 'google-gemini', label: 'Google Gemini' },
 ]
 
-// 服务商快捷预设（晴辰云官方置顶）
+// 服务商快捷预设
 export const PROVIDER_PRESETS = [
-  { key: 'qtcool', label: '晴辰云', badge: '官方', baseUrl: 'https://gpt.qt.cool/v1', api: 'openai-completions', site: 'https://gpt.qt.cool/', desc: 'GPT-5 全系列开箱即用，更多模型持续接入中。每日签到送额度 · 邀请送余额 · 充值最低 3 折消耗 · 未消耗包退' },
+  { key: 'qtcool', label: '晴辰云', badge: '推荐', baseUrl: 'https://gpt.qt.cool/v1', api: 'openai-completions', site: 'https://gpt.qt.cool/', desc: '在力所能及的范围内为用户提供不限量的模型支持，动态获取最新可用模型列表' },
   { key: 'shengsuanyun', label: '胜算云', baseUrl: 'https://router.shengsuanyun.com/api/v1', api: 'openai-completions', site: 'https://www.shengsuanyun.com/?from=CH_4BVI0BM2', desc: '国内知名 AI 模型聚合平台，支持多种主流模型' },
   { key: 'siliconflow', label: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', api: 'openai-completions', site: 'https://cloud.siliconflow.cn/i/PFrw2an5', desc: '高性价比推理平台，支持 DeepSeek、Qwen 等开源模型' },
   { key: 'volcengine', label: '火山引擎', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', api: 'openai-completions', site: 'https://volcengine.com/L/Ph1OP5I3_GY', desc: '字节跳动旗下云平台，支持豆包等模型' },
@@ -28,7 +28,7 @@ export const PROVIDER_PRESETS = [
   { key: 'ollama', label: 'Ollama (本地)', baseUrl: 'http://127.0.0.1:11434/v1', api: 'openai-completions' },
 ]
 
-// 晴辰云推广配置
+// 晴辰云配置
 export const QTCOOL = {
   baseUrl: 'https://gpt.qt.cool/v1',
   defaultKey: 'sk-0JDu7hyc51ZKD4iNebpFu07EUEhXmVVc',

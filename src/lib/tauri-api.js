@@ -193,7 +193,7 @@ export const api = {
 
   // 消息渠道管理
   readPlatformConfig: (platform) => invoke('read_platform_config', { platform }),
-  saveMessagingPlatform: (platform, form) => { invalidate('list_configured_platforms', 'read_platform_config'); return invoke('save_messaging_platform', { platform, form }) },
+  saveMessagingPlatform: (platform, form, accountId) => { invalidate('list_configured_platforms', 'read_platform_config'); return invoke('save_messaging_platform', { platform, form, accountId: accountId || null }) },
   removeMessagingPlatform: (platform) => { invalidate('list_configured_platforms', 'read_platform_config'); return invoke('remove_messaging_platform', { platform }) },
   toggleMessagingPlatform: (platform, enabled) => { invalidate('list_configured_platforms', 'read_openclaw_config', 'read_platform_config'); return invoke('toggle_messaging_platform', { platform, enabled }) },
   verifyBotToken: (platform, form) => invoke('verify_bot_token', { platform, form }),
@@ -254,8 +254,13 @@ export const api = {
   skillsInfo: (name) => invoke('skills_info', { name }),
   skillsCheck: () => invoke('skills_check'),
   skillsInstallDep: (kind, spec) => invoke('skills_install_dep', { kind, spec }),
+  skillsSkillHubCheck: () => invoke('skills_skillhub_check'),
+  skillsSkillHubSetup: (cliOnly = true) => invoke('skills_skillhub_setup', { cliOnly }),
+  skillsSkillHubSearch: (query) => invoke('skills_skillhub_search', { query }),
+  skillsSkillHubInstall: (slug) => invoke('skills_skillhub_install', { slug }),
   skillsClawHubSearch: (query) => invoke('skills_clawhub_search', { query }),
   skillsClawHubInstall: (slug) => invoke('skills_clawhub_install', { slug }),
+  skillsUninstall: (name) => invoke('skills_uninstall', { name }),
 
   // 实例管理
   instanceList: () => cachedInvoke('instance_list', {}, 10000),

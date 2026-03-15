@@ -423,7 +423,9 @@ async function openTaskDialog(job, page, state) {
         patch.payload = { kind: 'agentTurn', message }
         if (agentId) patch.agentId = agentId
         const deliveryChannel = modal.querySelector('select[name="deliveryChannel"]')?.value
-        if (deliveryChannel) patch.delivery = { channel: deliveryChannel }
+        if (deliveryChannel) {
+          patch.delivery = { mode: 'push', to: deliveryChannel, channel: deliveryChannel }
+        }
         await wsClient.request('cron.update', { id: job.id, patch })
         toast('任务已更新', 'success')
       } else {
@@ -435,7 +437,9 @@ async function openTaskDialog(job, page, state) {
         }
         if (agentId) params.agentId = agentId
         const deliveryChannel = modal.querySelector('select[name="deliveryChannel"]')?.value
-        if (deliveryChannel) params.delivery = { channel: deliveryChannel }
+        if (deliveryChannel) {
+          params.delivery = { mode: 'push', to: deliveryChannel, channel: deliveryChannel }
+        }
         await wsClient.request('cron.add', params)
         toast('任务已创建', 'success')
       }

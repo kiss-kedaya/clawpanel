@@ -1,8 +1,29 @@
-use crate::utils::openclaw_command_async;
 /// 记忆文件管理命令
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+/// 缓存 agent workspace 路径，避免每次操作都调 CLI（Windows 上 spawn Node.js 进程很慢）
+static WORKSPACE_CACHE: std::sync::LazyLock<Mutex<WorkspaceCache>> =
+    std::sync::LazyLock::new(|| Mutex::new(WorkspaceCache::default()));
+
+#[derive(Default)]
+struct WorkspaceCache {
+    map: HashMap<String, PathBuf>,
+    fetched_at: u64,
+}
+
+impl WorkspaceCache {
+    fn is_fresh(&self) -> bool {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        now - self.fetched_at < 60 // 60 秒 TTL
+    }
+}
 
 /// 检查路径是否包含不安全字符（目录遍历、绝对路径等）
 fn is_unsafe_path(path: &str) -> bool {
@@ -13,40 +34,82 @@ fn is_unsafe_path(path: &str) -> bool {
         || (path.len() >= 2 && path.as_bytes()[1] == b':') // Windows 绝对路径 C:\
 }
 
-/// 根据 agent_id 获取 workspace 路径（异步版本）
-/// 调用 openclaw agents list --json 解析
+/// 根据 agent_id 获取 workspace 路径（直接读 openclaw.json，带缓存）
+/// 不再调用 CLI，毫秒级响应
 async fn agent_workspace(agent_id: &str) -> Result<PathBuf, String> {
-    let output = openclaw_command_async()
-        .args(["agents", "list", "--json"])
-        .output()
-        .await
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "OpenClaw CLI 未找到，请确认已安装并重启 ClawPanel。\n如果使用 nvm 安装，请从终端启动 ClawPanel。".to_string()
-            } else {
-                format!("执行 openclaw 失败: {e}")
+    // 先查缓存
+    {
+        let cache = WORKSPACE_CACHE.lock().unwrap();
+        if cache.is_fresh() {
+            if let Some(ws) = cache.map.get(agent_id) {
+                return Ok(ws.clone());
             }
-        })?;
-
-    if !output.status.success() {
-        return Err("获取 Agent 列表失败".into());
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let agents: serde_json::Value = crate::commands::skills::extract_json_pub(&stdout)
-        .ok_or_else(|| "解析 JSON 失败: 输出中未找到有效 JSON".to_string())?;
-
-    if let Some(arr) = agents.as_array() {
-        for a in arr {
-            if a.get("id").and_then(|v| v.as_str()) == Some(agent_id) {
-                if let Some(ws) = a.get("workspace").and_then(|v| v.as_str()) {
-                    return Ok(PathBuf::from(ws));
-                }
+            if !cache.map.is_empty() {
+                return Err(format!("Agent「{agent_id}」不存在或无 workspace"));
             }
         }
     }
 
-    Err(format!("Agent「{agent_id}」不存在或无 workspace"))
+    // 缓存过期或为空，从 openclaw.json 读取
+    let config_path = super::openclaw_dir().join("openclaw.json");
+    let content =
+        fs::read_to_string(&config_path).map_err(|e| format!("读取 openclaw.json 失败: {e}"))?;
+    let config: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析 JSON 失败: {e}"))?;
+
+    let default_workspace = config
+        .get("agents")
+        .and_then(|a| a.get("defaults"))
+        .and_then(|d| d.get("workspace"))
+        .and_then(|w| w.as_str())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| super::openclaw_dir().join("workspace"));
+
+    let mut new_map = HashMap::new();
+    // main agent 使用默认 workspace
+    new_map.insert("main".to_string(), default_workspace);
+
+    if let Some(arr) = config
+        .get("agents")
+        .and_then(|a| a.get("list"))
+        .and_then(|l| l.as_array())
+    {
+        for a in arr {
+            let id = a.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if id.is_empty() {
+                continue;
+            }
+            let ws = a
+                .get("workspace")
+                .and_then(|v| v.as_str())
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    if id == "main" {
+                        super::openclaw_dir().join("workspace")
+                    } else {
+                        super::openclaw_dir()
+                            .join("agents")
+                            .join(id)
+                            .join("workspace")
+                    }
+                });
+            new_map.insert(id.to_string(), ws);
+        }
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let result = new_map.get(agent_id).cloned();
+    {
+        let mut cache = WORKSPACE_CACHE.lock().unwrap();
+        cache.map = new_map;
+        cache.fetched_at = now;
+    }
+
+    result.ok_or_else(|| format!("Agent「{agent_id}」不存在或无 workspace"))
 }
 
 async fn memory_dir_for_agent(agent_id: &str, category: &str) -> Result<PathBuf, String> {

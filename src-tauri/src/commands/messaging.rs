@@ -190,10 +190,12 @@ pub async fn read_platform_config(platform: String) -> Result<Value, String> {
 
 /// 保存平台配置到 openclaw.json
 /// 前端传入的是表单字段，后端负责转换成 OpenClaw 要求的结构
+/// account_id: 可选，指定时写入 channels.<platform>.accounts.<account_id>（多账号模式）
 #[tauri::command]
 pub async fn save_messaging_platform(
     platform: String,
     form: Value,
+    account_id: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
     let mut cfg = super::config::load_openclaw_json()?;
@@ -338,7 +340,6 @@ pub async fn save_messaging_platform(
             entry.insert("enabled".into(), Value::Bool(true));
             entry.insert("connectionMode".into(), Value::String("websocket".into()));
 
-            // 域名（默认 feishu，国际版选 lark）
             let domain = form_obj
                 .get("domain")
                 .and_then(|v| v.as_str())
@@ -349,7 +350,23 @@ pub async fn save_messaging_platform(
                 entry.insert("domain".into(), Value::String(domain));
             }
 
-            channels_map.insert("feishu".into(), Value::Object(entry));
+            // 多账号模式：写入 channels.feishu.accounts.<account_id>
+            if let Some(ref acct) = account_id {
+                if !acct.is_empty() {
+                    let feishu = channels_map
+                        .entry("feishu")
+                        .or_insert_with(|| json!({ "enabled": true }));
+                    let feishu_obj = feishu.as_object_mut().ok_or("feishu 节点格式错误")?;
+                    feishu_obj.entry("enabled").or_insert(Value::Bool(true));
+                    let accounts = feishu_obj.entry("accounts").or_insert_with(|| json!({}));
+                    let accounts_obj = accounts.as_object_mut().ok_or("accounts 格式错误")?;
+                    accounts_obj.insert(acct.clone(), Value::Object(entry));
+                } else {
+                    channels_map.insert("feishu".into(), Value::Object(entry));
+                }
+            } else {
+                channels_map.insert("feishu".into(), Value::Object(entry));
+            }
             ensure_plugin_allowed(&mut cfg, "feishu")?;
             let _ = cleanup_legacy_plugin_backup_dir("feishu");
         }

@@ -165,8 +165,13 @@ pub fn run() {
             skills::skills_info,
             skills::skills_check,
             skills::skills_install_dep,
+            skills::skills_skillhub_check,
+            skills::skills_skillhub_setup,
+            skills::skills_skillhub_search,
+            skills::skills_skillhub_install,
             skills::skills_clawhub_search,
             skills::skills_clawhub_install,
+            skills::skills_uninstall,
             // 前端热更新
             update::check_frontend_update,
             update::download_frontend_update,

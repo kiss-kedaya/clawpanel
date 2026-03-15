@@ -9,7 +9,7 @@ use std::os::windows::process::CommandExt;
 #[tauri::command]
 pub async fn skills_list() -> Result<Value, String> {
     let output = openclaw_command_async()
-        .args(["skills", "list", "--json", "--verbose"])
+        .args(["skills", "list", "--json"])
         .output()
         .await;
 
@@ -137,29 +137,122 @@ pub async fn skills_install_dep(kind: String, spec: Value) -> Result<Value, Stri
     }))
 }
 
-/// 从 ClawHub 安装 Skill（npx clawhub install <slug>）
+/// 检测 SkillHub CLI 是否已安装
 #[tauri::command]
-pub async fn skills_clawhub_install(slug: String) -> Result<Value, String> {
+pub async fn skills_skillhub_check() -> Result<Value, String> {
+    let path_env = super::enhanced_path();
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("cmd");
+        c.args(["/c", "skillhub", "--version"]);
+        c.creation_flags(0x08000000);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("skillhub");
+        c.arg("--version");
+        c
+    };
+    cmd.env("PATH", &path_env);
+    match cmd.output().await {
+        Ok(o) if o.status.success() => {
+            let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            Ok(serde_json::json!({ "installed": true, "version": ver }))
+        }
+        _ => Ok(serde_json::json!({ "installed": false })),
+    }
+}
+
+/// 安装 SkillHub CLI（从腾讯云 COS 下载）
+#[tauri::command]
+pub async fn skills_skillhub_setup(cli_only: bool) -> Result<Value, String> {
+    let path_env = super::enhanced_path();
+    #[allow(unused_variables)]
+    let flag = if cli_only {
+        "--cli-only"
+    } else {
+        "--no-skills"
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut cmd = tokio::process::Command::new("bash");
+        cmd.args(["-c", &format!(
+            "curl -fsSL https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.sh | bash -s -- {flag}"
+        )])
+        .env("PATH", &path_env);
+        super::apply_proxy_env_tokio(&mut cmd);
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| format!("执行安装脚本失败: {e}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() {
+            return Err(format!("SkillHub 安装失败: {}", stderr.trim()));
+        }
+        Ok(serde_json::json!({ "success": true, "output": stdout.trim() }))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 通过 npm 全局安装 skillhub（避免 bash/WSL 路径问题）
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.args([
+            "/c",
+            "npm",
+            "install",
+            "-g",
+            "skillhub@latest",
+            "--registry",
+            "https://registry.npmmirror.com",
+        ])
+        .env("PATH", &path_env);
+        super::apply_proxy_env_tokio(&mut cmd);
+        cmd.creation_flags(0x08000000);
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| format!("执行 npm install 失败: {e}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        if !output.status.success() {
+            return Err(format!("SkillHub CLI 安装失败: {}", stderr.trim()));
+        }
+        Ok(serde_json::json!({ "success": true, "output": stdout.trim() }))
+    }
+}
+
+/// 从 SkillHub 安装 Skill（skillhub install <slug>）
+#[tauri::command]
+pub async fn skills_skillhub_install(slug: String) -> Result<Value, String> {
     let path_env = super::enhanced_path();
     let home = dirs::home_dir().unwrap_or_default();
 
-    // 确保 skills 目录存在
     let skills_dir = super::openclaw_dir().join("skills");
     if !skills_dir.exists() {
         std::fs::create_dir_all(&skills_dir).map_err(|e| format!("创建 skills 目录失败: {e}"))?;
     }
 
-    let mut cmd = tokio::process::Command::new("npx");
-    cmd.args(["-y", "clawhub", "install", &slug])
-        .env("PATH", &path_env)
-        .current_dir(&home);
-    super::apply_proxy_env_tokio(&mut cmd);
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("cmd");
+        c.args(["/c", "skillhub", "install", &slug, "--force"]);
+        c.creation_flags(0x08000000);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("skillhub");
+        c.args(["install", &slug, "--force"]);
+        c
+    };
+    cmd.env("PATH", &path_env).current_dir(&home);
+    super::apply_proxy_env_tokio(&mut cmd);
     let output = cmd
         .output()
         .await
-        .map_err(|e| format!("执行 clawhub 失败: {e}"))?;
+        .map_err(|e| format!("执行 skillhub 失败: {e}。请先安装 SkillHub CLI"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -175,25 +268,34 @@ pub async fn skills_clawhub_install(slug: String) -> Result<Value, String> {
     }))
 }
 
-/// 从 ClawHub 搜索 Skills（npx clawhub search <query>）
+/// 从 SkillHub 搜索 Skills（skillhub search <query>）
 #[tauri::command]
-pub async fn skills_clawhub_search(query: String) -> Result<Value, String> {
+pub async fn skills_skillhub_search(query: String) -> Result<Value, String> {
     let q = query.trim().to_string();
     if q.is_empty() {
         return Ok(Value::Array(vec![]));
     }
 
     let path_env = super::enhanced_path();
-    let mut cmd = tokio::process::Command::new("npx");
-    cmd.args(["-y", "clawhub", "search", &q])
-        .env("PATH", &path_env);
-    super::apply_proxy_env_tokio(&mut cmd);
     #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("cmd");
+        c.args(["/c", "skillhub", "search", &q]);
+        c.creation_flags(0x08000000);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("skillhub");
+        c.args(["search", &q]);
+        c
+    };
+    cmd.env("PATH", &path_env);
+    super::apply_proxy_env_tokio(&mut cmd);
     let output = cmd
         .output()
         .await
-        .map_err(|e| format!("执行 clawhub 失败: {e}"))?;
+        .map_err(|e| format!("执行 skillhub 失败: {e}。请先安装 SkillHub CLI"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -202,7 +304,102 @@ pub async fn skills_clawhub_search(query: String) -> Result<Value, String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // clawhub search 输出是文本行，每行一个 skill
+    // skillhub search 实际输出格式：
+    // ──────────────── (分隔线)
+    // [1]   openclaw/openclaw/feishu-doc           🛡️ Pass
+    //      AI 85  ⬇     33  ⭐ 248.7k  Feishu document read/write opera...
+    // ──────────────── (分隔线)
+    // 序号和 slug 在同一行，描述在下一行
+    let lines: Vec<&str> = stdout.lines().collect();
+    let mut items: Vec<Value> = Vec::new();
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        // 找序号行：以 [数字] 开头，同一行包含 slug（owner/repo/name）
+        if !trimmed.starts_with('[') {
+            continue;
+        }
+        let bracket_end = match trimmed.find(']') {
+            Some(pos) => pos,
+            None => continue,
+        };
+        // 提取 ] 后面的内容
+        let after_bracket = trimmed[bracket_end + 1..].trim();
+        // slug 是第一个空格前的部分，且包含 /
+        let slug = after_bracket.split_whitespace().next().unwrap_or("").trim();
+        if !slug.contains('/') {
+            continue;
+        }
+
+        // 描述在下一行：跳过数字、⬇、⭐ 等统计信息，提取文字描述
+        let mut desc = String::new();
+        if i + 1 < lines.len() {
+            let next = lines[i + 1].trim();
+            // 找到第一个英文或中文字母开始的描述文字
+            // 格式: "AI 85  ⬇     33  ⭐ 248.7k  Feishu document..."
+            // 或: "⬇      0  ⭐ 212.2k  Feishu document..."
+            // 策略：找 ⭐ 后面的数字后的文字
+            if let Some(star_pos) = next.find('⭐') {
+                let after_star = &next[star_pos + '⭐'.len_utf8()..].trim_start();
+                // 跳过星标数字（如 "248.7k"）
+                let after_num = after_star
+                    .trim_start_matches(|c: char| {
+                        c.is_ascii_digit()
+                            || c == '.'
+                            || c == 'k'
+                            || c == 'K'
+                            || c == 'm'
+                            || c == 'M'
+                    })
+                    .trim();
+                if !after_num.is_empty() {
+                    desc = after_num.to_string();
+                }
+            }
+        }
+
+        items.push(serde_json::json!({
+            "slug": slug,
+            "description": desc,
+            "source": "skillhub"
+        }));
+    }
+
+    Ok(Value::Array(items))
+}
+
+/// 从 ClawHub 搜索 Skills（npx clawhub search <query>）— 原版海外源
+#[tauri::command]
+pub async fn skills_clawhub_search(query: String) -> Result<Value, String> {
+    let q = query.trim().to_string();
+    if q.is_empty() {
+        return Ok(Value::Array(vec![]));
+    }
+    let path_env = super::enhanced_path();
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("cmd");
+        c.args(["/c", "npx", "-y", "clawhub", "search", &q]);
+        c.creation_flags(0x08000000);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("npx");
+        c.args(["-y", "clawhub", "search", &q]);
+        c
+    };
+    cmd.env("PATH", &path_env);
+    super::apply_proxy_env_tokio(&mut cmd);
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("执行 clawhub 失败: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("搜索失败: {}", stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
     let items: Vec<Value> = stdout
         .lines()
         .map(|l| l.trim())
@@ -211,16 +408,61 @@ pub async fn skills_clawhub_search(query: String) -> Result<Value, String> {
             let parts: Vec<&str> = l.splitn(2, char::is_whitespace).collect();
             let slug = parts.first().unwrap_or(&"").trim();
             let desc = parts.get(1).unwrap_or(&"").trim();
-            serde_json::json!({
-                "slug": slug,
-                "description": desc,
-                "source": "clawhub"
-            })
+            serde_json::json!({ "slug": slug, "description": desc, "source": "clawhub" })
         })
         .filter(|v| !v["slug"].as_str().unwrap_or("").is_empty())
         .collect();
-
     Ok(Value::Array(items))
+}
+
+/// 从 ClawHub 安装 Skill（npx clawhub install <slug>）— 原版海外源
+#[tauri::command]
+pub async fn skills_clawhub_install(slug: String) -> Result<Value, String> {
+    let path_env = super::enhanced_path();
+    let home = dirs::home_dir().unwrap_or_default();
+    let skills_dir = super::openclaw_dir().join("skills");
+    if !skills_dir.exists() {
+        std::fs::create_dir_all(&skills_dir).map_err(|e| format!("创建 skills 目录失败: {e}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("cmd");
+        c.args(["/c", "npx", "-y", "clawhub", "install", &slug]);
+        c.creation_flags(0x08000000);
+        c
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("npx");
+        c.args(["-y", "clawhub", "install", &slug]);
+        c
+    };
+    cmd.env("PATH", &path_env).current_dir(&home);
+    super::apply_proxy_env_tokio(&mut cmd);
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| format!("执行 clawhub 失败: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("安装失败: {}", stderr.trim()));
+    }
+    Ok(serde_json::json!({ "success": true, "slug": slug, "output": stdout.trim() }))
+}
+
+/// 卸载 Skill（删除 ~/.openclaw/skills/<name>/ 目录）
+#[tauri::command]
+pub async fn skills_uninstall(name: String) -> Result<Value, String> {
+    if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') {
+        return Err("无效的 Skill 名称".to_string());
+    }
+    let skills_dir = super::openclaw_dir().join("skills").join(&name);
+    if !skills_dir.exists() {
+        return Err(format!("Skill「{name}」不存在"));
+    }
+    std::fs::remove_dir_all(&skills_dir).map_err(|e| format!("删除失败: {e}"))?;
+    Ok(serde_json::json!({ "success": true, "name": name }))
 }
 
 /// Public wrapper for extract_json, used by config.rs get_status_summary

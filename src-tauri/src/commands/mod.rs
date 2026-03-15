@@ -337,6 +337,13 @@ fn build_enhanced_path() -> String {
                 }
             }
         }
+        // NVM_SYMLINK 环境变量（nvm-windows 的活跃版本符号链接，如 D:\nodejs）
+        if let Ok(nvm_symlink) = std::env::var("NVM_SYMLINK") {
+            let symlink_path = std::path::Path::new(&nvm_symlink);
+            if symlink_path.is_dir() {
+                extra.push(nvm_symlink.clone());
+            }
+        }
         // NVM_HOME 环境变量（用户可能自定义了 nvm 安装目录）
         if let Ok(nvm_home) = std::env::var("NVM_HOME") {
             let nvm_path = std::path::Path::new(&nvm_home);

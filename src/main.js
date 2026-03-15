@@ -731,7 +731,21 @@ function startUpdateChecker() {
 
   const auth = await checkAuth()
   if (!auth.ok) await showLoginOverlay(auth.defaultPw)
-  boot()
+  try {
+    await boot()
+  } catch (bootErr) {
+    console.error('[main] boot() 失败:', bootErr)
+    _hideSplash()
+    const app = document.getElementById('app')
+    if (app) app.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:20px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+        <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px;color:#18181b">页面加载失败</div>
+        <div style="font-size:13px;color:#71717a;max-width:400px;line-height:1.6;margin-bottom:16px">${String(bootErr?.message || bootErr).replace(/</g,'&lt;')}</div>
+        <button onclick="location.reload()" style="padding:8px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;font-size:13px;cursor:pointer">刷新重试</button>
+        <div style="margin-top:24px;font-size:11px;color:#a1a1aa">如果问题持续出现，请尝试重新安装 ClawPanel<br>或在 <a href="https://github.com/qingchencloud/clawpanel/issues" target="_blank" style="color:#6366f1">GitHub Issues</a> 反馈</div>
+      </div>`
+  }
   startUpdateChecker()
 
   // 初始化全局 AI 助手浮动按钮（延迟加载，不阻塞启动）

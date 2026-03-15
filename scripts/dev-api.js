@@ -290,6 +290,35 @@ function clearLoginAttempts(ip) {
   _loginAttempts.delete(ip)
 }
 
+// 从 CLI 输出中提取 JSON（跳过 Node 警告、npm 更新提示等非 JSON 行）
+function extractCliJson(text) {
+  // 快速路径：整个文本就是合法 JSON
+  try { return JSON.parse(text) } catch {}
+  // 找到第一个 { 或 [ 开始尝试解析
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === '{' || ch === '[') {
+      // 找到匹配的闭合位置
+      let depth = 0, end = -1
+      const close = ch === '{' ? '}' : ']'
+      let inStr = false, esc = false
+      for (let j = i; j < text.length; j++) {
+        const c = text[j]
+        if (esc) { esc = false; continue }
+        if (c === '\\' && inStr) { esc = true; continue }
+        if (c === '"' && !esc) { inStr = !inStr; continue }
+        if (inStr) continue
+        if (c === ch) depth++
+        else if (c === close) { depth--; if (depth === 0) { end = j; break } }
+      }
+      if (end > i) {
+        try { return JSON.parse(text.slice(i, end + 1)) } catch {}
+      }
+    }
+  }
+  throw new Error('解析失败: 输出中未找到有效 JSON')
+}
+
 // 配置缓存：避免每次请求同步读磁盘（TTL 2秒，写入时立即失效）
 let _panelConfigCache = null
 let _panelConfigCacheTime = 0
@@ -1334,7 +1363,7 @@ const handlers = {
     return { exists: true, values: form }
   },
 
-  save_messaging_platform({ platform, form }) {
+  save_messaging_platform({ platform, form, accountId }) {
     if (!fs.existsSync(CONFIG_PATH)) throw new Error('openclaw.json 不存在')
     const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'))
     if (!cfg.channels) cfg.channels = {}
@@ -1356,6 +1385,14 @@ const handlers = {
       entry.appSecret = form.appSecret
       entry.connectionMode = 'websocket'
       if (form.domain) entry.domain = form.domain
+      // 多账号模式：写入 channels.feishu.accounts.<accountId>
+      if (accountId) {
+        if (!cfg.channels.feishu) cfg.channels.feishu = { enabled: true }
+        if (!cfg.channels.feishu.accounts) cfg.channels.feishu.accounts = {}
+        cfg.channels.feishu.accounts[accountId] = entry
+        fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2))
+        return { ok: true }
+      }
     } else {
       Object.assign(entry, form)
     }
@@ -3006,8 +3043,8 @@ const handlers = {
   skills_list() {
     // 尝试真实 CLI
     try {
-      const out = execSync('npx -y openclaw skills list --json --verbose', { encoding: 'utf8', timeout: 30000 })
-      return JSON.parse(out)
+      const out = execSync('npx -y openclaw skills list --json', { encoding: 'utf8', timeout: 30000 })
+      return extractCliJson(out)
     } catch {
       // CLI 不可用时返回 mock 数据
       return {
@@ -3026,7 +3063,7 @@ const handlers = {
   skills_info({ name }) {
     try {
       const out = execSync(`npx -y openclaw skills info ${JSON.stringify(name)} --json`, { encoding: 'utf8', timeout: 30000 })
-      return JSON.parse(out)
+      return extractCliJson(out)
     } catch (e) {
       throw new Error('查看详情失败: ' + (e.message || e))
     }
@@ -3034,7 +3071,7 @@ const handlers = {
   skills_check() {
     try {
       const out = execSync('npx -y openclaw skills check --json', { encoding: 'utf8', timeout: 30000 })
-      return JSON.parse(out)
+      return extractCliJson(out)
     } catch {
       return { summary: { total: 0, eligible: 0, disabled: 0, blocked: 0, missingRequirements: 0 }, eligible: [], disabled: [], blocked: [], missingRequirements: [] }
     }
@@ -3054,6 +3091,76 @@ const handlers = {
     } catch (e) {
       throw new Error(`安装失败: ${e.message || e}`)
     }
+  },
+  skills_skillhub_check() {
+    try {
+      const out = execSync('skillhub --version', { encoding: 'utf8', timeout: 5000 })
+      return { installed: true, version: out.trim() }
+    } catch {
+      return { installed: false }
+    }
+  },
+  skills_skillhub_setup({ cliOnly }) {
+    const flag = cliOnly ? '--cli-only' : '--no-skills'
+    try {
+      const out = execSync(
+        `curl -fsSL https://skillhub-1388575217.cos.ap-guangzhou.myqcloud.com/install/install.sh | bash -s -- ${flag}`,
+        { encoding: 'utf8', timeout: 120000 }
+      )
+      return { success: true, output: out.trim() }
+    } catch (e) {
+      throw new Error('SkillHub 安装失败: ' + (e.message || e))
+    }
+  },
+  skills_skillhub_search({ query }) {
+    const q = String(query || '').trim()
+    if (!q) return []
+    try {
+      const out = execSync(`skillhub search ${JSON.stringify(q)}`, { encoding: 'utf8', timeout: 30000 })
+      // 解析格式: [N]   owner/repo/name   状态\n     统计  描述...
+      const lines = out.split('\n')
+      const items = []
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim()
+        if (!trimmed.startsWith('[')) continue
+        const bracketEnd = trimmed.indexOf(']')
+        if (bracketEnd < 0) continue
+        const afterBracket = trimmed.slice(bracketEnd + 1).trim()
+        const slug = (afterBracket.split(/\s/)[0] || '').trim()
+        if (!slug.includes('/')) continue
+        let desc = ''
+        if (i + 1 < lines.length) {
+          const next = lines[i + 1].trim()
+          const starIdx = next.indexOf('⭐')
+          if (starIdx >= 0) {
+            const afterStar = next.slice(starIdx + 2).trim()
+            desc = afterStar.replace(/^[\d.]+[kKmM]?\s*/, '').trim()
+          }
+        }
+        items.push({ slug, description: desc, source: 'skillhub' })
+      }
+      return items
+    } catch (e) {
+      throw new Error('搜索失败: ' + (e.message || e) + '。请先安装 SkillHub CLI')
+    }
+  },
+  skills_skillhub_install({ slug }) {
+    const skillsDir = path.join(OPENCLAW_DIR, 'skills')
+    if (!fs.existsSync(skillsDir)) fs.mkdirSync(skillsDir, { recursive: true })
+    try {
+      const out = execSync(`skillhub install ${JSON.stringify(slug)} --force`, { cwd: homedir(), encoding: 'utf8', timeout: 120000 })
+      return { success: true, slug, output: out.trim() }
+    } catch (e) {
+      throw new Error('安装失败: ' + (e.message || e) + '。请先安装 SkillHub CLI')
+    }
+  },
+
+  skills_uninstall({ name }) {
+    if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) throw new Error('无效的 Skill 名称')
+    const skillDir = path.join(OPENCLAW_DIR, 'skills', name)
+    if (!fs.existsSync(skillDir)) throw new Error(`Skill「${name}」不存在`)
+    fs.rmSync(skillDir, { recursive: true, force: true })
+    return { success: true, name }
   },
   skills_clawhub_search({ query }) {
     const q = String(query || '').trim()

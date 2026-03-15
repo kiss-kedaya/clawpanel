@@ -27,6 +27,9 @@ nul
 release_body.md
 release_body.md.bak
 
+# 本地临时文件 / 设计文档
+.tmp/
+
 # 内部开发文档（不入公开仓）
 BLOCKING_ISSUES_REPORT.md
 __clawapp-chat-ref.js
