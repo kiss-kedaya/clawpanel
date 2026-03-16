@@ -1244,7 +1244,7 @@ function extractChatContent(message) {
       else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
         const callId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = callId ? _toolEventTimes.get(callId) : null
-        tools.push({
+        upsertTool(tools, {
           id: callId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || block.parameters || block.arguments || null,
@@ -1256,7 +1256,7 @@ function extractChatContent(message) {
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
         const resId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = resId ? _toolEventTimes.get(resId) : null
-        tools.push({
+        upsertTool(tools, {
           id: resId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || null,
@@ -1545,7 +1545,7 @@ function extractContent(msg) {
       else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
         const callId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = callId ? _toolEventTimes.get(callId) : null
-        tools.push({
+        upsertTool(tools, {
           id: callId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || block.parameters || block.arguments || null,
@@ -1557,7 +1557,7 @@ function extractContent(msg) {
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
         const resId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = resId ? _toolEventTimes.get(resId) : null
-        tools.push({
+        upsertTool(tools, {
           id: resId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || null,
