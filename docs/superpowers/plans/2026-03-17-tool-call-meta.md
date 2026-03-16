@@ -41,6 +41,31 @@ function getToolTime(tool) {
 
 Note: `formatTime` and `escapeHtml` already exist in `chat.js`.
 
+- [ ] **Step 1.5: Capture tool event timestamps**
+
+Add a map at top-level in `src/pages/chat.js`:
+
+```js
+const _toolEventTimes = new Map()
+```
+
+In `handleEvent`, before `handleChatEvent`, capture tool events:
+
+```js
+if (event === 'agent' && payload?.stream === 'tool' && payload?.data?.toolCallId) {
+  const ts = payload.ts
+  if (ts) _toolEventTimes.set(payload.data.toolCallId, ts)
+}
+```
+
+In `collectToolsFromMessage`, when constructing tool entries, set `time` when absent:
+
+```js
+const callId = call.id || call.tool_call_id
+const fallbackTime = callId ? _toolEventTimes.get(callId) : null
+... time: call.time || fallbackTime ...
+```
+
 - [ ] **Step 2: Render header with time**
 
 In `appendToolsToEl`, reuse the existing `summary` node created there and update header:
