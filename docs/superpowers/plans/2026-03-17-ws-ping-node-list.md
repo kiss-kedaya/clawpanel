@@ -24,7 +24,7 @@ git status -sb
 git commit --allow-empty -m "chore: checkpoint before ping change"
 ```
 
-Note: This checkpoint is required by policy; final functional commit occurs after build.
+Note: This checkpoint is mandatory by policy before modifications. The final functional commit still occurs after a successful build.
 
 - [ ] **Step 1: Replace ping payload**
 
@@ -48,6 +48,8 @@ git commit -m "fix: ping uses node.list"
 ```
 
 - [ ] **Step 4: Push（PowerShell）**
+
+Run only after successful build and commit.
 
 ```powershell
 git push
