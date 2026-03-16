@@ -1253,6 +1253,13 @@ function stripThinkingTags(text) {
     .trim()
 }
 
+function getToolTime(tool) {
+  const raw = tool?.end_time || tool?.endTime || tool?.timestamp || tool?.time || tool?.started_at || tool?.startedAt || null
+  if (!raw) return null
+  if (typeof raw === 'number' && raw < 1e12) return raw * 1000
+  return raw
+}
+
 function formatTime(date) {
   const now = new Date()
   const h = date.getHours().toString().padStart(2, '0')
@@ -1698,7 +1705,9 @@ function appendToolsToEl(el, tools) {
     details.removeAttribute('open')
     const summary = document.createElement('summary')
     const status = tool.status === 'error' ? '失败' : '成功'
-    summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status}`
+    const timeValue = getToolTime(tool)
+    const timeText = timeValue ? formatTime(new Date(timeValue)) : '时间未知'
+    summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status} · ${timeText}`
     const body = document.createElement('div')
     body.className = 'msg-tool-body'
     body.style.display = 'none'
@@ -1709,8 +1718,12 @@ function appendToolsToEl(el, tools) {
     })
     const inputJson = stripAnsi(safeStringify(tool.input))
     const outputJson = stripAnsi(safeStringify(tool.output))
-    const input = inputJson ? `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>${escapeHtml(inputJson)}</pre></div>` : ''
-    const output = outputJson ? `<div class="msg-tool-block"><div class="msg-tool-title">结果</div><pre>${escapeHtml(outputJson)}</pre></div>` : ''
+    const input = inputJson
+      ? `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>${escapeHtml(inputJson)}</pre></div>`
+      : `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>无参数</pre></div>`
+    const output = outputJson
+      ? `<div class="msg-tool-block"><div class="msg-tool-title">结果</div><pre>${escapeHtml(outputJson)}</pre></div>`
+      : `<div class="msg-tool-block"><div class="msg-tool-title">结果</div><pre>无结果</pre></div>`
     body.innerHTML = input + output
     details.appendChild(summary)
     details.appendChild(body)
