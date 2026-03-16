@@ -22,7 +22,7 @@ pub fn openclaw_command() -> std::process::Command {
     #[cfg(target_os = "windows")]
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let enhanced = crate::commands::enhanced_path();
+        let _enhanced = crate::commands::enhanced_path();
         // 优先：找到 openclaw.cmd 完整路径，用 cmd /c "完整路径" 避免引号问题
         if let Some(cmd_path) = find_openclaw_cmd() {
             let mut cmd = std::process::Command::new("cmd");
@@ -54,7 +54,7 @@ pub fn openclaw_command_async() -> tokio::process::Command {
     #[cfg(target_os = "windows")]
     {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let enhanced = crate::commands::enhanced_path();
+        let _enhanced = crate::commands::enhanced_path();
         // 优先：找到 openclaw.cmd 完整路径
         if let Some(cmd_path) = find_openclaw_cmd() {
             let mut cmd = tokio::process::Command::new("cmd");
