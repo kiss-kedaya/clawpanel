@@ -158,6 +158,7 @@ export const api = {
   getStatusSummary: () => cachedInvoke('get_status_summary', {}, 5000),
   readOpenclawConfig: () => cachedInvoke('read_openclaw_config'),
   writeOpenclawConfig: (config) => { invalidate('read_openclaw_config'); return invoke('write_openclaw_config', { config }) },
+  importOpenclawAiConfig: () => invoke('import_openclaw_ai_config'),
   readMcpConfig: () => cachedInvoke('read_mcp_config'),
   writeMcpConfig: (config) => { invalidate('read_mcp_config'); return invoke('write_mcp_config', { config }) },
   reloadGateway: () => invoke('reload_gateway'),

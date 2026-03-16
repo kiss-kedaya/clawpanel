@@ -68,6 +68,7 @@ pub fn run() {
             // 配置
             config::read_openclaw_config,
             config::write_openclaw_config,
+            config::import_openclaw_ai_config,
             config::read_mcp_config,
             config::write_mcp_config,
             config::get_version_info,

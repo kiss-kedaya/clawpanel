@@ -340,6 +340,48 @@ pub fn load_openclaw_json() -> Result<Value, String> {
     read_openclaw_config()
 }
 
+#[tauri::command]
+pub fn import_openclaw_ai_config() -> Result<Value, String> {
+    let config = read_openclaw_config()?;
+    let primary = config
+        .get("agents")
+        .and_then(|v| v.get("defaults"))
+        .and_then(|v| v.get("model"))
+        .and_then(|v| v.get("primary"))
+        .and_then(|v| v.as_str())
+        .ok_or("缺少默认模型")?
+        .to_string();
+
+    let parts: Vec<&str> = primary.split('/').collect();
+    if parts.len() < 2 {
+        return Err("默认模型格式错误".to_string());
+    }
+    let provider_key = parts[0];
+    let model_id = parts[1..].join("/");
+
+    let provider = config
+        .get("models")
+        .and_then(|v| v.get("providers"))
+        .and_then(|v| v.get(provider_key))
+        .ok_or("未找到模型提供商配置")?;
+
+    let api_type = provider.get("api").and_then(|v| v.as_str()).unwrap_or("openai-completions");
+    let api_key = provider.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+    let base_url = provider.get("baseUrl").and_then(|v| v.as_str()).unwrap_or("");
+    let temperature = provider.get("temperature").and_then(|v| v.as_f64());
+    let top_p = provider.get("top_p").and_then(|v| v.as_f64());
+
+    Ok(serde_json::json!({
+        "provider": provider_key,
+        "model": model_id,
+        "apiType": api_type,
+        "apiKey": api_key,
+        "baseUrl": base_url,
+        "temperature": temperature,
+        "topP": top_p
+    }))
+}
+
 /// 供其他模块复用：将 JSON Value 写回配置文件（含备份和清理）
 pub fn save_openclaw_json(config: &Value) -> Result<(), String> {
     write_openclaw_config(config.clone())

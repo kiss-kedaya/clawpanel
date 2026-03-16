@@ -172,34 +172,44 @@ fn npm_root_global() -> Result<PathBuf, String> {
 
 fn resolve_openclaw_dist_dir() -> Result<PathBuf, String> {
     let root = npm_root_global()?;
-    let openclaw_dir = root.join("openclaw");
-    if !openclaw_dir.exists() {
-        return Err("未找到全局 openclaw 安装目录".to_string());
+    let candidates = [
+        root.join("@qingchencloud").join("openclaw-zh"),
+        root.join("openclaw"),
+    ];
+    for pkg_dir in candidates {
+        if !pkg_dir.exists() {
+            continue;
+        }
+        let dist = pkg_dir.join("dist");
+        if dist.exists() {
+            return Ok(dist);
+        }
     }
-    let dist = openclaw_dir.join("dist");
-    if !dist.exists() {
-        return Err("未找到 openclaw dist 目录".to_string());
-    }
-    Ok(dist)
+    Err("未找到 openclaw dist 目录".to_string())
 }
 
 fn read_openclaw_version() -> Result<String, String> {
     let root = npm_root_global()?;
-    let pkg = root.join("openclaw").join("package.json");
-    if !pkg.exists() {
-        return Err("未找到 openclaw package.json".to_string());
+    let pkg_candidates = [
+        root.join("@qingchencloud").join("openclaw-zh").join("package.json"),
+        root.join("openclaw").join("package.json"),
+    ];
+    for pkg in pkg_candidates {
+        if !pkg.exists() {
+            continue;
+        }
+        let content = fs::read_to_string(&pkg).map_err(|e| format!("读取失败: {e}"))?;
+        let value: Value = serde_json::from_str(&content).map_err(|e| format!("解析失败: {e}"))?;
+        let version = value
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !version.is_empty() {
+            return Ok(version);
+        }
     }
-    let content = fs::read_to_string(&pkg).map_err(|e| format!("读取失败: {e}"))?;
-    let value: Value = serde_json::from_str(&content).map_err(|e| format!("解析失败: {e}"))?;
-    let version = value
-        .get("version")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    if version.is_empty() {
-        return Err("openclaw 版本为空".to_string());
-    }
-    Ok(version)
+    Err("openclaw 版本为空".to_string())
 }
 
 fn find_latest_file(dir: &Path, prefix: &str) -> Result<PathBuf, String> {
@@ -252,19 +262,30 @@ fn replace_once(hay: &str, needle: &str, replacement: &str) -> Result<String, St
     Ok(hay.replacen(needle, replacement, 1))
 }
 
+fn replace_once_any(hay: &str, needles: &[&str], replacement: &str) -> Result<String, String> {
+    for needle in needles {
+        if hay.contains(needle) {
+            return Ok(hay.replacen(needle, replacement, 1));
+        }
+    }
+    Err("未找到补丁位置".to_string())
+}
+
 fn patch_reply_file(path: &Path, _force: bool) -> Result<bool, String> {
     let content = fs::read_to_string(path).map_err(|e| format!("读取失败: {e}"))?;
     if content.contains("kind: Type.Literal(\"sessionMessage\")") {
         return Ok(false);
     }
     let needle_schema = "const CronPayloadSchema = Type.Union([Type.Object({\n\tkind: Type.Literal(\"systemEvent\"),\n\ttext: NonEmptyString\n}, { additionalProperties: false }), ";
+    let needle_schema_sp = "const CronPayloadSchema = Type.Union([Type.Object({\n  kind: Type.Literal(\"systemEvent\"),\n  text: NonEmptyString\n}, { additionalProperties: false }), ";
     let insert_schema = "const CronPayloadSchema = Type.Union([Type.Object({\n\tkind: Type.Literal(\"systemEvent\"),\n\ttext: NonEmptyString\n}, { additionalProperties: false }), Type.Object({\n\tkind: Type.Literal(\"sessionMessage\"),\n\tlabel: NonEmptyString,\n\tmessage: NonEmptyString,\n\trole: Type.Optional(Type.Literal(\"user\")),\n\twaitForIdle: Type.Optional(Type.Boolean())\n}, { additionalProperties: false }), ";
 
     let needle_patch = "const CronPayloadPatchSchema = Type.Union([Type.Object({\n\tkind: Type.Literal(\"systemEvent\"),\n\ttext: Type.Optional(NonEmptyString)\n}, { additionalProperties: false }), ";
+    let needle_patch_sp = "const CronPayloadPatchSchema = Type.Union([Type.Object({\n  kind: Type.Literal(\"systemEvent\"),\n  text: Type.Optional(NonEmptyString)\n}, { additionalProperties: false }), ";
     let insert_patch = "const CronPayloadPatchSchema = Type.Union([Type.Object({\n\tkind: Type.Literal(\"systemEvent\"),\n\ttext: Type.Optional(NonEmptyString)\n}, { additionalProperties: false }), Type.Object({\n\tkind: Type.Literal(\"sessionMessage\"),\n\tlabel: Type.Optional(NonEmptyString),\n\tmessage: Type.Optional(NonEmptyString),\n\trole: Type.Optional(Type.Literal(\"user\")),\n\twaitForIdle: Type.Optional(Type.Boolean())\n}, { additionalProperties: false }), ";
 
-    let mut next = replace_once(&content, needle_schema, insert_schema)?;
-    next = replace_once(&next, needle_patch, insert_patch)?;
+    let mut next = replace_once_any(&content, &[needle_schema, needle_schema_sp], insert_schema)?;
+    next = replace_once_any(&next, &[needle_patch, needle_patch_sp], insert_patch)?;
 
     backup_file(path)?;
     fs::write(path, next).map_err(|e| format!("写入失败: {e}"))?;

@@ -2561,7 +2561,10 @@ function showSettings() {
       <div class="ast-settings-form">
         <div class="ast-tab-panel active" data-panel="api">
           <div class="form-group" style="margin-bottom:8px">
-            <label class="form-label">快捷选择</label>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <label class="form-label" style="margin:0">快捷选择</label>
+              <button class="btn btn-sm btn-secondary" id="ast-import-openclaw">从 openclaw 导入</button>
+            </div>
             <div id="ast-provider-presets" style="display:flex;flex-wrap:wrap;gap:6px">
               ${PROVIDER_PRESETS.filter(p => !p.hidden).map(p => `<button class="btn btn-sm btn-secondary ast-preset-btn" data-key="${p.key}" data-url="${escHtml(p.baseUrl)}" data-api="${p.api}" style="font-size:12px;padding:3px 10px">${p.label}${p.badge ? ' <span style="font-size:9px;background:var(--accent);color:#fff;padding:1px 4px;border-radius:6px;margin-left:3px">' + p.badge + '</span>' : ''}</button>`).join('')}
             </div>
@@ -2767,6 +2770,7 @@ function showSettings() {
   const apiHintEl = overlay.querySelector('#ast-api-hint')
   const baseUrlInput = overlay.querySelector('#ast-baseurl')
   const apiKeyInput = overlay.querySelector('#ast-apikey')
+  const importBtn = overlay.querySelector('#ast-import-openclaw')
   overlay.querySelectorAll('.ast-preset-btn').forEach(btn => {
     btn.onclick = () => {
       baseUrlInput.value = btn.dataset.url
@@ -2793,6 +2797,32 @@ function showSettings() {
       }
     }
   })
+
+  if (importBtn) {
+    importBtn.addEventListener('click', async () => {
+      try {
+        importBtn.disabled = true
+        const result = await api.importOpenclawAiConfig()
+        if (!result || !result.model) {
+          toast('未找到可导入的 AI 配置', 'warning')
+          return
+        }
+        baseUrlInput.value = result.baseUrl || ''
+        apiKeyInput.value = result.apiKey || ''
+        overlay.querySelector('#ast-model').value = result.model || ''
+        apiTypeSelect.value = normalizeApiType(result.apiType || 'openai-completions')
+        apiTypeSelect.dispatchEvent(new Event('change'))
+        if (result.temperature && overlay.querySelector('#ast-temp')) {
+          overlay.querySelector('#ast-temp').value = result.temperature
+        }
+        toast('已导入 openclaw 配置', 'success')
+      } catch (e) {
+        toast('导入失败: ' + (e?.message || e), 'error')
+      } finally {
+        importBtn.disabled = false
+      }
+    })
+  }
 
   // API 类型切换时更新提示文本和 placeholder
   apiTypeSelect.addEventListener('change', () => {
