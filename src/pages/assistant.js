@@ -4292,8 +4292,11 @@ export async function render() {
 function updateOptimizeState() {
   if (!_optimizeBtn || !_restoreBtn || !_textarea) return
   const hasText = _textarea.value.trim().length > 0
+  const hasSnapshot = _optOriginalText !== null
+  _optimizeBtn.style.display = hasSnapshot ? 'none' : ''
+  _restoreBtn.style.display = hasSnapshot ? '' : 'none'
   _optimizeBtn.disabled = _optBusy || !hasText
-  _restoreBtn.disabled = _optOriginalText === null
+  _restoreBtn.disabled = _optBusy
 }
 
 function applyTextareaText(text) {
@@ -4346,6 +4349,7 @@ async function optimizeInputText() {
 function restoreOriginalText() {
   if (_optOriginalText === null) return
   applyTextareaText(_optOriginalText)
+  clearOptimizeSnapshot()
 }
 
 function clearOptimizeSnapshot() {
