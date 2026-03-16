@@ -374,7 +374,7 @@ export class WsClient {
   }
 
   chatSend(sessionKey, message, attachments) {
-    const params = { sessionKey, message, deliver: false, idempotencyKey: uuid() }
+    const params = { sessionKey, message, deliver: true, idempotencyKey: uuid() }
     if (attachments && attachments.length > 0) {
       params.attachments = attachments
       console.log('[ws] 发送附件:', attachments.length, '个')
