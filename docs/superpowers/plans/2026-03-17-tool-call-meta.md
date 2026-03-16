@@ -28,17 +28,22 @@ Note: This checkpoint is required by policy; final functional commit occurs afte
 
 - [ ] **Step 1: Add helper to get tool time**
 
-Add a function (near tool helpers):
+Add a function near other helpers in `src/pages/chat.js` (below `stripThinkingTags`):
 
 ```js
 function getToolTime(tool) {
-  return tool?.end_time || tool?.endTime || tool?.timestamp || tool?.time || tool?.started_at || tool?.startedAt || null
+  const raw = tool?.end_time || tool?.endTime || tool?.timestamp || tool?.time || tool?.started_at || tool?.startedAt || null
+  if (!raw) return null
+  if (typeof raw === 'number' && raw < 1e12) return raw * 1000
+  return raw
 }
 ```
 
+Note: `formatTime` and `escapeHtml` already exist in `chat.js`.
+
 - [ ] **Step 2: Render header with time**
 
-Update tool header to include time:
+In `appendToolsToEl`, reuse the existing `summary` node created there and update header:
 
 ```js
 const time = getToolTime(tool)
@@ -48,11 +53,15 @@ summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status} · ${time
 
 - [ ] **Step 3: Add placeholders**
 
-Ensure placeholders show when empty:
+Use the exact block structure already used in tool body:
 
 ```js
-const input = inputJson ? `<div ...>...</div>` : `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>无参数</pre></div>`
-const output = outputJson ? `<div ...>...</div>` : `<div class="msg-tool-block"><div class="msg-tool-title">结果</div><pre>无结果</pre></div>`
+const input = inputJson
+  ? `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>${escapeHtml(inputJson)}</pre></div>`
+  : `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>无参数</pre></div>`
+const output = outputJson
+  ? `<div class="msg-tool-block"><div class="msg-tool-title">结果</div><pre>${escapeHtml(outputJson)}</pre></div>`
+  : `<div class="msg-tool-block"><div class="msg-tool-title">结果</div><pre>无结果</pre></div>`
 ```
 
 - [ ] **Step 4: Build**
