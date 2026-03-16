@@ -476,6 +476,7 @@ async function openTaskDialog(job, page, state) {
         const patch = { name, enabled }
         patch.schedule = { kind: 'cron', expr: schedule }
         if (taskKind === 'sessionMessage') {
+          patch.sessionTarget = 'main'
           patch.payload = { kind: 'sessionMessage', label: sessionLabel, message: SESSION_MESSAGE_TEXT, role: 'user', waitForIdle: true }
         } else {
           patch.payload = { kind: 'agentTurn', message }
@@ -494,6 +495,7 @@ async function openTaskDialog(job, page, state) {
           schedule: { kind: 'cron', expr: schedule },
         }
         if (taskKind === 'sessionMessage') {
+          params.sessionTarget = 'main'
           params.payload = { kind: 'sessionMessage', label: sessionLabel, message: SESSION_MESSAGE_TEXT, role: 'user', waitForIdle: true }
         } else {
           params.payload = { kind: 'agentTurn', message }
