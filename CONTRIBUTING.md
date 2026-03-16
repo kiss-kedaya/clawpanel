@@ -2,7 +2,7 @@
 
 感谢你对 ClawPanel 项目的关注！本文档同时作为**贡献指南**和**项目维护手册**，涵盖开发、构建、发版、部署的完整工作流。
 
-> 🌐 **官网**: [claw.qt.cool](https://claw.qt.cool/)  |  📦 **仓库**: [github.com/qingchencloud/clawpanel](https://github.com/qingchencloud/clawpanel)
+> **官网**: [claw.qt.cool](https://claw.qt.cool/)  |  **仓库**: [github.com/qingchencloud/clawpanel](https://github.com/qingchencloud/clawpanel)
 
 ---
 

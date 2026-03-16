@@ -898,9 +898,9 @@ function handleEvent(msg) {
   // Compaction 状态指示：上游 2026.3.12 新增 status_reaction 事件
   if (event === 'chat.status_reaction' || event === 'status_reaction') {
     const reaction = payload.reaction || payload.emoji || ''
-    if (reaction.includes('compact') || reaction === '🗜️' || reaction === '📦') {
+    if (reaction.includes('compact') || reaction === 'compress' || reaction === 'package') {
       showCompactionHint(true)
-    } else if (!reaction || reaction === 'thinking' || reaction === '💭') {
+    } else if (!reaction || reaction === 'thinking' || reaction === 'thought') {
       showCompactionHint(false)
     }
   }
@@ -1558,7 +1558,7 @@ function showCompactionHint(show) {
     hint = document.createElement('div')
     hint.id = 'compaction-hint'
     hint.className = 'msg msg-system compaction-hint'
-    hint.innerHTML = '🗜️ 正在整理上下文（Compaction）…'
+    hint.innerHTML = '正在整理上下文（Compaction）…'
     _messagesEl.insertBefore(hint, _typingEl)
     scrollToBottom()
   } else if (!show && hint) {

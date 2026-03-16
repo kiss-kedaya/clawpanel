@@ -1857,14 +1857,14 @@ async function executeTool(name, args) {
       const missing = skills.filter(s => !s.eligible && !s.disabled)
       const disabled = skills.filter(s => s.disabled)
       let summary = `共 ${skills.length} 个 Skills: ${eligible.length} 可用, ${missing.length} 缺依赖, ${disabled.length} 已禁用\n\n`
-      if (eligible.length) summary += `## 可用 (${eligible.length})\n` + eligible.map(s => `- ${s.emoji || '📦'} **${s.name}**: ${s.description || ''}${s.bundled ? ' [捆绑]' : ''}`).join('\n') + '\n\n'
+      if (eligible.length) summary += `## 可用 (${eligible.length})\n` + eligible.map(s => `- ${s.emoji || ''} **${s.name}**: ${s.description || ''}${s.bundled ? ' [捆绑]' : ''}`.trim()).join('\n') + '\n\n'
       if (missing.length) summary += `## 缺依赖 (${missing.length})\n` + missing.map(s => {
         const m = s.missing || {}
         const deps = [...(m.bins||[]), ...(m.env||[]).map(e=>'$'+e), ...(m.config||[])].join(', ')
         const installs = (s.install||[]).map(i => i.label).join(' / ')
-        return `- ${s.emoji || '📦'} **${s.name}**: 缺少 ${deps}${installs ? ' → 可通过: ' + installs : ''}`
+        return `- ${s.emoji || ''} **${s.name}**: 缺少 ${deps}${installs ? ' → 可通过: ' + installs : ''}`.trim()
       }).join('\n') + '\n\n'
-      if (disabled.length) summary += `## 已禁用 (${disabled.length})\n` + disabled.map(s => `- ${s.emoji || '📦'} **${s.name}**: ${s.description || ''}`).join('\n') + '\n'
+      if (disabled.length) summary += `## 已禁用 (${disabled.length})\n` + disabled.map(s => `- ${s.emoji || ''} **${s.name}**: ${s.description || ''}`.trim()).join('\n') + '\n'
       return summary
     }
     case 'skills_info':

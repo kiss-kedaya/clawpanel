@@ -119,9 +119,9 @@ function renderMessages(el) {
         <div class="form-hint">每条 AI 回复开头自动加的前缀。支持 {model}、{provider}、{thinkingLevel} 等变量。设为 auto 则显示 Agent 名称</div>
       </div>
       <div class="form-group">
-        <label class="form-label">确认反应 Emoji</label>
-        <input class="form-input" id="msg-ackReaction" value="${esc(m.ackReaction || '')}" placeholder="如 👀 或留空禁用" style="max-width:200px">
-        <div class="form-hint">收到消息时自动添加的 emoji 反应（确认已收到）</div>
+        <label class="form-label">确认反应标记</label>
+        <input class="form-input" id="msg-ackReaction" value="${esc(m.ackReaction || '')}" placeholder="如 seen 或留空禁用" style="max-width:200px">
+        <div class="form-hint">收到消息时自动添加的确认标记（确认已收到）</div>
       </div>
       <div class="form-group">
         <label class="form-label">确认反应范围</label>

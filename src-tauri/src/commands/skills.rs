@@ -306,8 +306,8 @@ pub async fn skills_skillhub_search(query: String) -> Result<Value, String> {
 
     // skillhub search 实际输出格式：
     // ──────────────── (分隔线)
-    // [1]   openclaw/openclaw/feishu-doc           🛡️ Pass
-    //      AI 85  ⬇     33  ⭐ 248.7k  Feishu document read/write opera...
+    // [1]   openclaw/openclaw/feishu-doc           Pass
+    //      AI 85  Downloads 33  Stars 248.7k  Feishu document read/write opera...
     // ──────────────── (分隔线)
     // 序号和 slug 在同一行，描述在下一行
     let lines: Vec<&str> = stdout.lines().collect();

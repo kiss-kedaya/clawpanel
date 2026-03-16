@@ -118,7 +118,7 @@ function renderSkills(el, data) {
 
     ${disabled.length ? `
     <div class="clawhub-panel" style="margin-bottom:var(--space-lg)">
-      <div class="clawhub-panel-title" style="color:var(--text-tertiary)">⏸ 已禁用 (${disabled.length})</div>
+      <div class="clawhub-panel-title" style="color:var(--text-tertiary)">已禁用 (${disabled.length})</div>
       <div class="clawhub-list skills-scroll-area skills-search-scroll" id="skills-disabled">
         ${disabled.map(s => renderSkillCard(s, 'disabled')).join('')}
       </div>
@@ -126,7 +126,7 @@ function renderSkills(el, data) {
 
     ${blocked.length ? `
     <div class="clawhub-panel" style="margin-bottom:var(--space-lg)">
-      <div class="clawhub-panel-title" style="color:var(--text-tertiary)">🚫 白名单阻止 (${blocked.length})</div>
+      <div class="clawhub-panel-title" style="color:var(--text-tertiary)">白名单阻止 (${blocked.length})</div>
       <div class="clawhub-list">
         ${blocked.map(s => renderSkillCard(s, 'blocked')).join('')}
       </div>
@@ -158,7 +158,7 @@ function renderSkills(el, data) {
 }
 
 function renderSkillCard(skill, status) {
-  const emoji = skill.emoji || '📦'
+  const emoji = skill.emoji || ''
   const name = skill.name || ''
   const desc = skill.description || ''
   const source = skill.bundled ? '捆绑' : (skill.source || '自定义')
@@ -234,7 +234,7 @@ async function handleInfo(page, name) {
 
     detail.innerHTML = `
       <div class="clawhub-detail-card">
-        <div class="clawhub-detail-title">${esc(s.emoji || '📦')} ${esc(s.name || name)}</div>
+        <div class="clawhub-detail-title">${esc(s.emoji || '')} ${esc(s.name || name)}</div>
         <div class="clawhub-detail-meta">
           来源: ${esc(s.source || '')} · 路径: <code>${esc(s.filePath || '')}</code>
           ${s.homepage ? ` · <a href="${esc(s.homepage)}" target="_blank" rel="noopener">${esc(s.homepage)}</a>` : ''}
