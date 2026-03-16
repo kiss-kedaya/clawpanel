@@ -411,4 +411,6 @@ export class WsClient {
   }
 }
 
-export const wsClient = new WsClient()
+const g = typeof window !== 'undefined' ? window : globalThis
+if (!g.__clawpanelWsClient) g.__clawpanelWsClient = new WsClient()
+export const wsClient = g.__clawpanelWsClient
