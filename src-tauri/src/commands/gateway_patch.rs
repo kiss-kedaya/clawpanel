@@ -11,6 +11,8 @@ const PATCH_VERSION: &str = "sessionMessage-v1";
 #[derive(Serialize, Deserialize, Default)]
 pub struct GatewayPatchStatus {
     pub installed_version: Option<String>,
+    #[serde(rename = "openclawVersion")]
+    pub openclaw_version: Option<String>,
     pub patched: bool,
     pub patched_version: Option<String>,
     pub patched_at: Option<String>,
@@ -41,6 +43,15 @@ pub async fn gateway_patch_apply(force: Option<bool>) -> Result<GatewayPatchStat
     ];
 
     if force_apply {
+        if !backup_exists(&reply_path) || !backup_exists(&gateway_path) {
+            let err = "缺少备份，建议先一键补丁".to_string();
+            status.last_error = Some(err.clone());
+            status.installed_version = openclaw_version.clone();
+            status.openclaw_version = status.openclaw_version.or(openclaw_version.clone());
+            status.files = files.clone();
+            let _ = write_status_to_panel(&status);
+            return Err(err);
+        }
         restore_backup(&reply_path)?;
         restore_backup(&gateway_path)?;
     }
@@ -51,7 +62,8 @@ pub async fn gateway_patch_apply(force: Option<bool>) -> Result<GatewayPatchStat
     if !reply_patched && !gateway_patched {
         status.patched = true;
         status.patched_version = status.patched_version.or(Some(PATCH_VERSION.to_string()));
-        status.installed_version = openclaw_version;
+        status.installed_version = openclaw_version.clone();
+        status.openclaw_version = status.openclaw_version.or(openclaw_version.clone());
         status.files = files;
         write_status_to_panel(&status)?;
         return Ok(status);
@@ -60,7 +72,8 @@ pub async fn gateway_patch_apply(force: Option<bool>) -> Result<GatewayPatchStat
     status.patched = true;
     status.patched_version = Some(PATCH_VERSION.to_string());
     status.patched_at = Some(chrono::Local::now().to_rfc3339());
-    status.installed_version = openclaw_version;
+    status.installed_version = openclaw_version.clone();
+    status.openclaw_version = openclaw_version;
     status.files = files;
     status.last_error = None;
     write_status_to_panel(&status)?;
@@ -210,6 +223,11 @@ fn find_latest_file(dir: &Path, prefix: &str) -> Result<PathBuf, String> {
         .last()
         .map(|(p, _)| p.clone())
         .ok_or_else(|| format!("未找到 {prefix}*.js"))
+}
+
+fn backup_exists(path: &Path) -> bool {
+    let backup_path = PathBuf::from(format!("{}.bak", path.display()));
+    backup_path.exists()
 }
 
 fn backup_file(path: &Path) -> Result<(), String> {

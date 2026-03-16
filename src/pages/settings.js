@@ -65,6 +65,7 @@ async function loadAll(page) {
   tasks.push(loadCloudflared(page))
   tasks.push(loadGatewayPatch(page))
   await Promise.all(tasks)
+  await runGatewayPatchAutoDetect(page)
 }
 
 // ===== 网络代理 =====
@@ -289,6 +290,44 @@ async function handleSaveRegistry(page) {
 
 // ===== Gateway 补丁 =====
 
+const GATEWAY_PATCH_COOLDOWN_MS = 5 * 60 * 1000
+let _gatewayPatchLastCheck = 0
+let _gatewayPatchRunning = false
+
+async function runGatewayPatchAutoDetect(page) {
+  if (_gatewayPatchRunning) return
+  const now = Date.now()
+  if (now - _gatewayPatchLastCheck < GATEWAY_PATCH_COOLDOWN_MS) return
+  _gatewayPatchLastCheck = now
+  _gatewayPatchRunning = true
+  try {
+    const status = await api.gatewayPatchStatus()
+    const installed = status?.installed_version
+    const recorded = status?.openclawVersion || status?.openclaw_version
+    if (!installed || !recorded) return
+    if (installed === recorded) return
+    await api.gatewayPatchApply(true)
+    await loadGatewayPatch(page)
+  } catch (e) {
+    const msg = String(e || '')
+    if (msg && page) {
+      const el = page.querySelector('#gateway-patch-bar')
+      if (el) {
+        const existing = el.querySelector('[data-name="gateway-patch-error"]')
+        if (existing) existing.remove()
+        const errorEl = document.createElement('div')
+        errorEl.dataset.name = 'gateway-patch-error'
+        errorEl.style.color = 'var(--error)'
+        errorEl.style.marginTop = 'var(--space-xs)'
+        errorEl.textContent = `自动重打失败: ${msg}`
+        el.appendChild(errorEl)
+      }
+    }
+  } finally {
+    _gatewayPatchRunning = false
+  }
+}
+
 async function loadGatewayPatch(page) {
   const el = page.querySelector('#gateway-patch-bar')
   if (!el) return
@@ -296,6 +335,7 @@ async function loadGatewayPatch(page) {
     const status = await api.gatewayPatchStatus()
     const patched = !!status?.patched
     const installed = status?.installed_version || '未知'
+    const recorded = status?.openclawVersion || status?.openclaw_version || '-'
     const patchedVersion = status?.patched_version || '-'
     const patchedAt = status?.patched_at || '-'
     const files = Array.isArray(status?.files) && status.files.length > 0 ? status.files.map(escapeHtml).join(', ') : '-'
@@ -321,6 +361,9 @@ async function loadGatewayPatch(page) {
         </div>
         <div class="form-label">补丁时间
           <div class="form-hint">${escapeHtml(patchedAt)}</div>
+        </div>
+        <div class="form-label">记录版本
+          <div class="form-hint">${escapeHtml(recorded)}</div>
         </div>
         <div class="form-label">补丁文件
           <div class="form-hint">${escapeHtml(files)}</div>
