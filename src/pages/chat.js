@@ -68,6 +68,7 @@ let _pageActive = false
 const _toolEventTimes = new Map()
 const _toolEventData = new Map()
 const _toolRunIndex = new Map()
+const _toolEventSeen = new Set()
 let _errorTimer = null, _lastErrorMsg = null
 let _attachments = []
 let _hasEverConnected = false
@@ -916,6 +917,9 @@ function handleEvent(msg) {
   if (event === 'agent' && payload?.stream === 'tool' && payload?.data?.toolCallId) {
     const ts = payload.ts
     const toolCallId = payload.data.toolCallId
+    const runKey = `${payload.runId}:${toolCallId}`
+    if (_toolEventSeen.has(runKey)) return
+    _toolEventSeen.add(runKey)
     if (ts) _toolEventTimes.set(toolCallId, ts)
     const current = _toolEventData.get(toolCallId) || {}
     if (payload.data?.args && current.input == null) current.input = payload.data.args
@@ -928,6 +932,9 @@ function handleEvent(msg) {
       if (!list.includes(toolCallId)) list.push(toolCallId)
       _toolRunIndex.set(payload.runId, list)
     }
+    const name = payload.data?.name || '工具'
+    const phase = payload.data?.phase || 'unknown'
+    appendSystemMessage(`${name} · ${phase}`, ts)
   }
 
   if (event === 'chat') handleChatEvent(payload)
@@ -1337,7 +1344,7 @@ function createStreamBubble() {
   bubble.className = 'msg-bubble'
   bubble.innerHTML = '<span class="stream-cursor"></span>'
   wrap.appendChild(bubble)
-  _messagesEl.insertBefore(wrap, _typingEl)
+  insertMessageByTime(wrap, Date.now())
   scrollToBottom()
   return bubble
 }
@@ -1635,7 +1642,7 @@ function appendUserMessage(text, attachments = [], msgTime) {
 
   wrap.appendChild(bubble)
   wrap.appendChild(meta)
-  _messagesEl.insertBefore(wrap, _typingEl)
+  insertMessageByTime(wrap, msgTime?.getTime?.() || Date.now())
   scrollToBottom()
 }
 
@@ -1659,7 +1666,7 @@ function appendAiMessage(text, msgTime, images, videos, audios, files, tools) {
 
   wrap.appendChild(bubble)
   wrap.appendChild(meta)
-  _messagesEl.insertBefore(wrap, _typingEl)
+  insertMessageByTime(wrap, msgTime?.getTime?.() || Date.now())
   scrollToBottom()
 }
 
@@ -1841,11 +1848,25 @@ function showLightbox(src) {
   document.addEventListener('keydown', onKey)
 }
 
-function appendSystemMessage(text) {
+function insertMessageByTime(wrap, ts) {
+  const tsValue = Number(ts || Date.now())
+  wrap.dataset.ts = String(tsValue)
+  const items = Array.from(_messagesEl.querySelectorAll('.msg'))
+  for (const node of items) {
+    const nodeTs = parseInt(node.dataset.ts || '0', 10)
+    if (nodeTs > tsValue) {
+      _messagesEl.insertBefore(wrap, node)
+      return
+    }
+  }
+  _messagesEl.insertBefore(wrap, _typingEl)
+}
+
+function appendSystemMessage(text, ts) {
   const wrap = document.createElement('div')
   wrap.className = 'msg msg-system'
   wrap.textContent = text
-  _messagesEl.insertBefore(wrap, _typingEl)
+  insertMessageByTime(wrap, ts)
   scrollToBottom()
 }
 
