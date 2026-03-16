@@ -846,6 +846,10 @@ function toggleCmdPanel() {
 function sendMessage() {
   const text = _textarea.value.trim()
   if (!text && !_attachments.length) return
+  if (!wsClient.gatewayReady || !_sessionKey) {
+    toast('Gateway 未就绪，连接成功后再发送', 'warning')
+    return
+  }
   hideCmdPanel()
   _textarea.value = ''
   _textarea.style.height = 'auto'
@@ -858,6 +862,10 @@ function sendMessage() {
 }
 
 async function doSend(text, attachments = []) {
+  if (!wsClient.gatewayReady || !_sessionKey) {
+    toast('Gateway 未就绪，连接成功后再发送', 'warning')
+    return
+  }
   appendUserMessage(text, attachments)
   saveMessage({
     id: uuid(), sessionKey: _sessionKey, role: 'user', content: text, timestamp: Date.now(),
