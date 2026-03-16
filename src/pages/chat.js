@@ -581,7 +581,7 @@ async function connectGateway() {
     }
 
     // 如果正在连接中（重连等），等待 onReady 回调即可
-    if (wsClient.connected) return
+    if (wsClient.connected || wsClient.connecting || wsClient.gatewayReady) return
 
     // 未连接，发起新连接
     const config = await api.readOpenclawConfig()
