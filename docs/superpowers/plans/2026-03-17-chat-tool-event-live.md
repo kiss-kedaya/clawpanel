@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Display tool events as live system messages ordered by payload.ts and de-duplicated by payload.ts + toolCallId.
+**Goal:** Display tool events as live system messages ordered by payload.ts and de-duplicated by payload.runId + toolCallId.
 
 **Architecture:** Extend chat event handling to create tool-event system messages and insert into DOM by timestamp; add dedupe map keyed by ts+toolCallId.
 
@@ -40,11 +40,12 @@ Add a helper to insert a message wrapper by timestamp:
 
 ```js
 function insertMessageByTime(wrap, ts) {
-  wrap.dataset.ts = String(ts || Date.now())
+  const tsValue = Number(ts || Date.now())
+  wrap.dataset.ts = String(tsValue)
   const items = Array.from(_messagesEl.querySelectorAll('.msg'))
   for (const node of items) {
     const nodeTs = parseInt(node.dataset.ts || '0', 10)
-    if (nodeTs > ts) {
+    if (nodeTs > tsValue) {
       _messagesEl.insertBefore(wrap, node)
       return
     }
@@ -68,7 +69,7 @@ function appendToolEventMessage(name, phase, ts, isError) {
 
 ```js
 if (event === 'agent' && payload?.stream === 'tool' && payload?.data?.toolCallId) {
-  const key = `${payload.ts}:${payload.data.toolCallId}`
+  const key = `${payload.runId}:${payload.data.toolCallId}`
   if (_toolEventSeen.has(key)) return
   _toolEventSeen.add(key)
   const name = payload.data.name || '工具'
