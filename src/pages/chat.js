@@ -1586,6 +1586,11 @@ function appendToolsToEl(el, tools) {
     const body = document.createElement('div')
     body.className = 'msg-tool-body'
     body.style.display = 'none'
+    console.debug('[chat][tool] init', {
+      name: tool.name,
+      open: details.open,
+      bodyDisplay: body.style.display,
+    })
     const inputJson = safeStringify(tool.input)
     const outputJson = safeStringify(tool.output)
     const input = inputJson ? `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>${escapeHtml(inputJson)}</pre></div>` : ''
@@ -1595,10 +1600,26 @@ function appendToolsToEl(el, tools) {
     details.appendChild(body)
     details.addEventListener('toggle', () => {
       body.style.display = details.open ? 'grid' : 'none'
+      console.debug('[chat][tool] toggle', {
+        name: tool.name,
+        open: details.open,
+        bodyDisplay: body.style.display,
+      })
     })
     container.appendChild(details)
   })
   el.appendChild(container)
+  try {
+    const first = container.querySelector('details')
+    if (first) {
+      const body = first.querySelector('.msg-tool-body')
+      console.debug('[chat][tool] after-append', {
+        open: first.open,
+        bodyDisplay: body?.style?.display,
+        computed: body ? getComputedStyle(body).display : null,
+      })
+    }
+  } catch {}
 }
 
 function safeStringify(value) {
