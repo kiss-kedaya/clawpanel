@@ -173,33 +173,33 @@ function renderConfigured(page, state) {
     <div class="config-section">
       <div class="config-section-title">已接入</div>
       <div class="platforms-grid">
-        ${state.configured.map(p => {
+        ${state.configured.flatMap(p => {
           const reg = PLATFORM_REGISTRY[p.id]
           const label = reg?.label || p.id
           const ic = icon(reg?.iconName || 'radio', 22)
           const channelKey = getChannelBindingKey(p.id)
           const allBindings = (state.bindings || []).filter(b => b.match?.channel === channelKey)
-          const boundAgents = allBindings.map(b => b.agentId || 'main')
-          // 只有一个 main 绑定时不显示标签（默认行为），多绑定时全部显示
-          const showAll = boundAgents.length > 1 || (boundAgents.length === 1 && boundAgents[0] !== 'main')
-          const agentBadges = showAll ? boundAgents.map(a =>
-            `<span style="font-size:var(--font-size-xs);color:var(--accent);background:var(--accent-muted);padding:1px 6px;border-radius:10px;white-space:nowrap">→ ${escapeAttr(a)}</span>`
-          ).join(' ') : ''
-          return `
-            <div class="platform-card ${p.enabled ? 'active' : 'inactive'}" data-pid="${p.id}">
-              <div class="platform-card-header">
-                <span class="platform-emoji">${ic}</span>
-                <span class="platform-name">${label}</span>
-                ${agentBadges}
-                <span class="platform-status-dot ${p.enabled ? 'on' : 'off'}"></span>
+          const boundAgents = allBindings.length ? allBindings.map(b => b.agentId || 'main') : ['main']
+          return boundAgents.map(agentId => {
+            const badge = agentId !== 'main'
+              ? `<span style="font-size:var(--font-size-xs);color:var(--accent);background:var(--accent-muted);padding:1px 6px;border-radius:10px;white-space:nowrap">→ ${escapeAttr(agentId)}</span>`
+              : ''
+            return `
+              <div class="platform-card ${p.enabled ? 'active' : 'inactive'}" data-pid="${p.id}" data-agent="${escapeAttr(agentId)}">
+                <div class="platform-card-header">
+                  <span class="platform-emoji">${ic}</span>
+                  <span class="platform-name">${label}</span>
+                  ${badge}
+                  <span class="platform-status-dot ${p.enabled ? 'on' : 'off'}"></span>
+                </div>
+                <div class="platform-card-actions">
+                  <button class="btn btn-sm btn-secondary" data-action="edit">${icon('edit', 14)} 编辑</button>
+                  <button class="btn btn-sm btn-secondary" data-action="toggle">${p.enabled ? icon('pause', 14) + ' 禁用' : icon('play', 14) + ' 启用'}</button>
+                  <button class="btn btn-sm btn-danger" data-action="remove">${icon('trash', 14)}</button>
+                </div>
               </div>
-              <div class="platform-card-actions">
-                <button class="btn btn-sm btn-secondary" data-action="edit">${icon('edit', 14)} 编辑</button>
-                <button class="btn btn-sm btn-secondary" data-action="toggle">${p.enabled ? icon('pause', 14) + ' 禁用' : icon('play', 14) + ' 启用'}</button>
-                <button class="btn btn-sm btn-danger" data-action="remove">${icon('trash', 14)}</button>
-              </div>
-            </div>
-          `
+            `
+          })
         }).join('')}
       </div>
     </div>

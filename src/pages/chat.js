@@ -1584,6 +1584,7 @@ function appendToolsToEl(el, tools) {
     summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status}`
     const body = document.createElement('div')
     body.className = 'msg-tool-body'
+    body.style.display = 'none'
     const inputJson = safeStringify(tool.input)
     const outputJson = safeStringify(tool.output)
     const input = inputJson ? `<div class="msg-tool-block"><div class="msg-tool-title">参数</div><pre>${escapeHtml(inputJson)}</pre></div>` : ''
@@ -1591,6 +1592,9 @@ function appendToolsToEl(el, tools) {
     body.innerHTML = input + output
     details.appendChild(summary)
     details.appendChild(body)
+    details.addEventListener('toggle', () => {
+      body.style.display = details.open ? 'grid' : 'none'
+    })
     container.appendChild(details)
   })
   el.appendChild(container)

@@ -348,11 +348,11 @@
 .chat-input-area {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--bg-primary);
 }
 
 .chat-input-wrapper {
@@ -363,12 +363,12 @@
 .chat-input-wrapper textarea {
   width: 100%;
   resize: none;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md, 8px);
-  padding: 8px 12px;
-  font-size: 13px;
-  line-height: 1.4;
-  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--bg-secondary, var(--bg-card));
   color: var(--text-primary);
   outline: none;
   transition: border-color 0.15s;
