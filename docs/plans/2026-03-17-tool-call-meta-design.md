@@ -14,7 +14,8 @@
 ## 设计细节
 ### 时间来源
 - 优先读取：`tool.end_time` / `tool.endTime` / `tool.timestamp` / `tool.time` / `tool.started_at` / `tool.startedAt`
-- 若均为空：显示 `时间未知`
+- 若均为空：使用工具事件流 `event: agent` 的 `payload.ts`（按 `toolCallId` 映射）
+- 仍为空时：显示 `时间未知`
 
 ### 展开内容
 - `input` 为空时显示 `无参数`
