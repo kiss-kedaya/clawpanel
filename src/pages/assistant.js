@@ -1104,7 +1104,9 @@ let _config = null, _sessions = [], _currentSessionId = null
 let _lastRenderTime = 0
 let _saveThrottleTimer = null
 const _sessionStatus = new Map() // sessionId → 'idle' | 'streaming' | 'waiting' | 'error'
-let _messageQueue = [] // [{ id, text, ts }]
+const _streamingBySession = new Map() // sessionId → boolean
+const _abortBySession = new Map() // sessionId → AbortController
+const _queueBySession = new Map() // sessionId → [{ id, text, ts }]
 let _streamRefreshTimer = null // 后台流式刷新定时器
 let _pendingImages = [] // [{ id, dataUrl, name, size }] 待发送图片
 let _errorContext = null // 待处理的错误上下文 { scene, title, hint, error, ts }
@@ -1119,6 +1121,37 @@ function throttledSave() {
   }, 500)
 }
 
+function getStreaming(sessionId) {
+  return _streamingBySession.get(sessionId) === true
+}
+
+function setStreaming(sessionId, value) {
+  if (!sessionId) return
+  if (value) _streamingBySession.set(sessionId, true)
+  else _streamingBySession.delete(sessionId)
+}
+
+function getAbortController(sessionId) {
+  return _abortBySession.get(sessionId) || null
+}
+
+function setAbortController(sessionId, controller) {
+  if (!sessionId) return
+  if (controller) _abortBySession.set(sessionId, controller)
+  else _abortBySession.delete(sessionId)
+}
+
+function getQueue(sessionId) {
+  if (!sessionId) return []
+  if (!_queueBySession.has(sessionId)) _queueBySession.set(sessionId, [])
+  return _queueBySession.get(sessionId)
+}
+
+function setQueue(sessionId, queue) {
+  if (!sessionId) return
+  _queueBySession.set(sessionId, queue)
+}
+
 function flushSave() {
   if (_saveThrottleTimer) {
     clearTimeout(_saveThrottleTimer)
@@ -1130,7 +1163,7 @@ function flushSave() {
 // ── 后台流式刷新 ──
 // 当用户切页面再回来时，轮询刷新最后一个 AI 气泡内容
 function refreshStreamingBubble() {
-  if (!_messagesEl || !_isStreaming) return
+  if (!_messagesEl || !_currentSessionId || !getStreaming(_currentSessionId)) return
   const session = getCurrentSession()
   if (!session) return
   const lastMsg = session.messages[session.messages.length - 1]
@@ -1158,13 +1191,17 @@ function stopStreamRefresh() {
 
 // ── 发送队列 ──
 function enqueueMessage(text) {
-  _messageQueue.push({ id: Date.now().toString(), text, ts: Date.now() })
+  if (!_currentSessionId) return
+  const queue = getQueue(_currentSessionId)
+  queue.push({ id: Date.now().toString(), text, ts: Date.now() })
+  setQueue(_currentSessionId, queue)
   renderQueue()
 }
 
 function renderQueue() {
-  if (!_queueEl) return
-  if (_messageQueue.length === 0) {
+  if (!_queueEl || !_currentSessionId) return
+  const queue = getQueue(_currentSessionId)
+  if (queue.length === 0) {
     _queueEl.innerHTML = ''
     _queueEl.style.display = 'none'
     return
@@ -1175,8 +1212,8 @@ function renderQueue() {
   const editSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'
   const delSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
 
-  _queueEl.innerHTML = `<div class="ast-queue-header">${queueSvg} 发送队列 (${_messageQueue.length})</div>` +
-    _messageQueue.map((item, i) => `
+  _queueEl.innerHTML = `<div class="ast-queue-header">${queueSvg} 发送队列 (${queue.length})</div>` +
+    queue.map((item, i) => `
       <div class="ast-queue-item" data-queue-id="${item.id}">
         <span class="ast-queue-num">${i + 1}</span>
         <span class="ast-queue-text" data-queue-edit="${item.id}" title="点击编辑">${escHtml(item.text)}</span>
@@ -1190,8 +1227,12 @@ function renderQueue() {
 }
 
 function processQueue() {
-  if (_isStreaming || _messageQueue.length === 0) return
-  const next = _messageQueue.shift()
+  if (!_currentSessionId) return
+  if (getStreaming(_currentSessionId)) return
+  const queue = getQueue(_currentSessionId)
+  if (queue.length === 0) return
+  const next = queue.shift()
+  setQueue(_currentSessionId, queue)
   renderQueue()
   sendMessageDirect(next.text)
 }
@@ -1458,7 +1499,7 @@ const TIMEOUT_TOTAL = 120_000    // 总超时 120 秒
 const TIMEOUT_CHUNK = 30_000     // 流式 chunk 间隔超时 30 秒
 const TIMEOUT_CONNECT = 30_000   // 连接超时 30 秒
 
-async function callAI(messages, onChunk) {
+async function callAI(sessionId, messages, onChunk) {
   const apiType = normalizeApiType(_config.apiType)
   if (!_config.baseUrl || !_config.model || (requiresApiKey(apiType) && !_config.apiKey)) {
     throw new Error('请先配置 AI 模型（点击右上角设置按钮）')
@@ -2034,7 +2075,7 @@ async function executeToolWithSafety(toolName, args, tcForConfirm) {
 }
 
 // 带工具调用的 AI 请求（非流式，用于 tool_calls 检测循环）
-async function callAIWithTools(messages, onStatus, onToolProgress) {
+async function callAIWithTools(sessionId, messages, onStatus, onToolProgress) {
   const apiType = normalizeApiType(_config.apiType)
   if (!_config.baseUrl || !_config.model || (requiresApiKey(apiType) && !_config.apiKey)) {
     throw new Error('请先配置 AI 模型（点击右上角设置按钮）')
@@ -2049,7 +2090,7 @@ async function callAIWithTools(messages, onStatus, onToolProgress) {
   let nextPauseAt = autoRounds   // 下一次暂停的轮次阈值
   for (let round = 0; ; round++) {
     // 检查是否已被用户中止
-    if (!_isStreaming || _abortController?.signal?.aborted) {
+    if (!sessionId || !getStreaming(sessionId) || _abortController?.signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError')
     }
     if (autoRounds > 0 && round >= nextPauseAt) {
@@ -3419,7 +3460,7 @@ function sendMessage(text) {
   const hasContent = text.trim() || _pendingImages.length > 0
   if (!hasContent) return
   // 流式中 → 排队（图片不排队，提示用户）
-  if (_isStreaming) {
+  if (_currentSessionId && getStreaming(_currentSessionId)) {
     if (_pendingImages.length > 0) {
       toast('AI 正在回复中，图片消息请等待完成后再发送', 'info')
       return
@@ -3434,7 +3475,7 @@ function sendMessage(text) {
 async function sendMessageDirect(text) {
   const hasContent = text.trim() || _pendingImages.length > 0
   if (!hasContent) return
-  if (_isStreaming) {
+  if (_currentSessionId && getStreaming(_currentSessionId)) {
     if (_pendingImages.length > 0) { toast('请等待 AI 回复完成', 'info'); return }
     enqueueMessage(text.trim())
     return
@@ -3485,8 +3526,11 @@ async function sendMessageDirect(text) {
   const aiMsg = { role: 'assistant', content: '', ts: Date.now() }
   session.messages.push(aiMsg)
 
-  _isStreaming = true
-  _sendBtn.innerHTML = stopIcon()
+  setStreaming(session.id, true)
+  if (_currentSessionId === session.id) {
+    _isStreaming = true
+    _sendBtn.innerHTML = stopIcon()
+  }
   setSessionStatus(session.id, 'streaming')
 
   // 渲染流式 typing 状态
@@ -3503,7 +3547,7 @@ async function sendMessageDirect(text) {
       const aiMsgContainers = _messagesEl?.querySelectorAll('.ast-msg-ai')
       const lastContainer = aiMsgContainers?.[aiMsgContainers.length - 1]
 
-      const result = await callAIWithTools(contextMessages,
+      const result = await callAIWithTools(session.id, contextMessages,
         // onStatus
         (status) => {
           if (lastBubble) lastBubble.innerHTML = `<span class="ast-typing">${escHtml(status)}</span>`
@@ -3527,7 +3571,7 @@ async function sendMessageDirect(text) {
       renderMessages()
     } else {
       // ── 普通流式模式 ──
-      await callAI(contextMessages, (chunk) => {
+      await callAI(session.id, contextMessages, (chunk) => {
         aiMsg.content += chunk
         throttledSave() // 实时保存每个 chunk
         if (lastBubble) {
@@ -3592,11 +3636,14 @@ async function sendMessageDirect(text) {
       })
     }
   } finally {
-    _isStreaming = false
+    setStreaming(session.id, false)
+    if (_currentSessionId === session.id) {
+      _isStreaming = false
+      stopStreamRefresh()
+      if (_sendBtn) _sendBtn.innerHTML = sendIcon()
+      if (_textarea) _textarea.focus()
+    }
     _abortController = null
-    stopStreamRefresh()
-    if (_sendBtn) _sendBtn.innerHTML = sendIcon()
-    if (_textarea) _textarea.focus()
     session.updatedAt = Date.now()
     flushSave()
     if (getSessionStatus(session.id) !== 'error') {
@@ -3613,7 +3660,8 @@ async function sendMessageDirect(text) {
 
 // 重试 AI 响应（不重复添加用户消息）
 async function retryAIResponse(session) {
-  if (_isStreaming) return
+  if (!session?.id) return
+  if (getStreaming(session.id)) return
 
   const contextMessages = session.messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -3622,8 +3670,11 @@ async function retryAIResponse(session) {
   const aiMsg = { role: 'assistant', content: '', ts: Date.now() }
   session.messages.push(aiMsg)
 
-  _isStreaming = true
-  if (_sendBtn) _sendBtn.innerHTML = stopIcon()
+  setStreaming(session.id, true)
+  if (_currentSessionId === session.id) {
+    _isStreaming = true
+    if (_sendBtn) _sendBtn.innerHTML = stopIcon()
+  }
   setSessionStatus(session.id, 'streaming')
 
   renderMessages()
@@ -3638,7 +3689,7 @@ async function retryAIResponse(session) {
       const aiMsgContainers = _messagesEl?.querySelectorAll('.ast-msg-ai')
       const lastContainer = aiMsgContainers?.[aiMsgContainers.length - 1]
 
-      const result = await callAIWithTools(contextMessages,
+      const result = await callAIWithTools(session.id, contextMessages,
         (status) => { if (lastBubble) lastBubble.innerHTML = `<span class="ast-typing">${escHtml(status)}</span>` },
         (history) => {
           aiMsg.toolHistory = history
@@ -3654,7 +3705,7 @@ async function retryAIResponse(session) {
       if (result.toolHistory.length > 0) aiMsg.toolHistory = result.toolHistory
       renderMessages()
     } else {
-      await callAI(contextMessages, (chunk) => {
+      await callAI(session.id, contextMessages, (chunk) => {
         aiMsg.content += chunk
         throttledSave()
         if (lastBubble) {
@@ -3708,11 +3759,14 @@ async function retryAIResponse(session) {
       })
     }
   } finally {
-    _isStreaming = false
+    setStreaming(session.id, false)
+    if (_currentSessionId === session.id) {
+      _isStreaming = false
+      stopStreamRefresh()
+      if (_sendBtn) _sendBtn.innerHTML = sendIcon()
+      if (_textarea) _textarea.focus()
+    }
     _abortController = null
-    stopStreamRefresh()
-    if (_sendBtn) _sendBtn.innerHTML = sendIcon()
-    if (_textarea) _textarea.focus()
     session.updatedAt = Date.now()
     flushSave()
     if (getSessionStatus(session.id) !== 'error') {
@@ -3727,6 +3781,9 @@ async function retryAIResponse(session) {
 }
 
 function stopStreaming() {
+  if (_currentSessionId) {
+    setStreaming(_currentSessionId, false)
+  }
   _isStreaming = false
   if (_abortController) {
     _abortController.abort()
@@ -3925,7 +3982,8 @@ export async function render() {
   requestAnimationFrame(() => positionModeSlider(page, currentMode()))
 
   // 如果有后台流式正在进行，恢复 UI 状态
-  if (_isStreaming) {
+  if (_currentSessionId && getStreaming(_currentSessionId)) {
+    _isStreaming = true
     _sendBtn.innerHTML = stopIcon()
     startStreamRefresh()
   }
@@ -3966,7 +4024,7 @@ export async function render() {
 
   // 发送（流式中输入排队，空输入时点按钮停止流式）
   _sendBtn.addEventListener('click', () => {
-    if (_isStreaming && !_textarea.value.trim() && _pendingImages.length === 0) { stopStreaming(); return }
+    if (_currentSessionId && getStreaming(_currentSessionId) && !_textarea.value.trim() && _pendingImages.length === 0) { stopStreaming(); return }
     if (_textarea.value.trim() || _pendingImages.length > 0) {
       sendMessage(_textarea.value)
       _textarea.value = ''
@@ -4041,7 +4099,7 @@ export async function render() {
       if (idx === -1) return
       const item = _messageQueue.splice(idx, 1)[0]
       renderQueue()
-      if (_isStreaming) stopStreaming()
+      if (_currentSessionId && getStreaming(_currentSessionId)) stopStreaming()
       setTimeout(() => sendMessageDirect(item.text), 150)
       return
     }
@@ -4136,9 +4194,11 @@ export async function render() {
       renderSessionList()
       renderMessages()
       // 切换到正在流式的会话时，启动刷新
-      if (_isStreaming && getSessionStatus(_currentSessionId) === 'streaming') {
+      if (_currentSessionId && getStreaming(_currentSessionId) && getSessionStatus(_currentSessionId) === 'streaming') {
+        _isStreaming = true
         startStreamRefresh()
       } else {
+        _isStreaming = false
         stopStreamRefresh()
       }
     }
