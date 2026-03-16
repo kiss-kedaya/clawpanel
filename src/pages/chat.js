@@ -1241,22 +1241,24 @@ function extractChatContent(message) {
       else if (block.type === 'file' || block.type === 'document') {
         files.push({ url: block.url || '', name: block.fileName || block.name || '文件', mimeType: block.mimeType || '', size: block.size, data: block.data })
       }
-      else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call') {
-        const callId = block.id || block.tool_call_id
+      else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
+        const callId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = callId ? _toolEventTimes.get(callId) : null
         tools.push({
-          name: block.name || block.tool || block.tool_name || '工具',
-          input: block.input || block.args || block.parameters || null,
+          id: callId,
+          name: block.name || block.tool || block.tool_name || block.toolName || '工具',
+          input: block.input || block.args || block.parameters || block.arguments || null,
           output: null,
           status: block.status || 'ok',
           time: block.time || fallbackTime || null,
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
-        const resId = block.id || block.tool_call_id
+        const resId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = resId ? _toolEventTimes.get(resId) : null
         tools.push({
-          name: block.name || block.tool || block.tool_name || '工具',
+          id: resId,
+          name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || null,
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
@@ -1540,22 +1542,24 @@ function extractContent(msg) {
       else if (block.type === 'file' || block.type === 'document') {
         files.push({ url: block.url || '', name: block.fileName || block.name || '文件', mimeType: block.mimeType || '', size: block.size, data: block.data })
       }
-      else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call') {
-        const callId = block.id || block.tool_call_id
+      else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
+        const callId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = callId ? _toolEventTimes.get(callId) : null
         tools.push({
-          name: block.name || block.tool || block.tool_name || '工具',
-          input: block.input || block.args || block.parameters || null,
+          id: callId,
+          name: block.name || block.tool || block.tool_name || block.toolName || '工具',
+          input: block.input || block.args || block.parameters || block.arguments || null,
           output: null,
           status: block.status || 'ok',
           time: block.time || fallbackTime || null,
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
-        const resId = block.id || block.tool_call_id
+        const resId = block.id || block.tool_call_id || block.toolCallId
         const fallbackTime = resId ? _toolEventTimes.get(resId) : null
         tools.push({
-          name: block.name || block.tool || block.tool_name || '工具',
+          id: resId,
+          name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || null,
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
