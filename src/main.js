@@ -29,6 +29,7 @@ initTheme()
 // === 访问密码保护（Web + 桌面端通用） ===
 const isTauri = !!window.__TAURI_INTERNALS__
 let _forceSetup = false
+let _skipSetup = false
 
 const GATEWAY_PATCH_COOLDOWN_MS = 5 * 60 * 1000
 let _gatewayPatchLastCheck = 0
@@ -375,6 +376,7 @@ async function boot() {
   const ensureWebSession = isTauri
     ? api.readPanelConfig().then(cfg => {
         _forceSetup = cfg.forceSetup === true
+        _skipSetup = cfg.Setup === true
         if (cfg.accessPassword) {
           return fetch('/__api/auth_login', {
             method: 'POST',
@@ -388,7 +390,7 @@ async function boot() {
   ensureWebSession.then(() => loadActiveInstance()).then(() => detectOpenclawStatus()).then(() => {
     // 重新渲染侧边栏（检测完成后 isOpenclawReady 状态已更新）
     renderSidebar(sidebar)
-    if (_forceSetup || !isOpenclawReady()) {
+    if (_forceSetup || (!isOpenclawReady() && !_skipSetup)) {
       setDefaultRoute('/setup')
       navigate('/setup')
     } else {
@@ -450,7 +452,7 @@ async function boot() {
             navigate('/dashboard')
           }
           // 如果卸载后变为未就绪，跳转到 setup
-          if ((_forceSetup || !isOpenclawReady()) && !isUpgrading()) {
+          if ((_forceSetup || (!isOpenclawReady() && !_skipSetup)) && !isUpgrading()) {
             setDefaultRoute('/setup')
             navigate('/setup')
           }

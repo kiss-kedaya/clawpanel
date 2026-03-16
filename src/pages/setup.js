@@ -25,16 +25,22 @@ export async function render() {
 
       <div id="setup-steps"></div>
 
-      <div style="margin-top:var(--space-lg)">
+      <div style="margin-top:var(--space-lg);display:flex;gap:8px;justify-content:center">
         <button class="btn btn-secondary btn-sm" id="btn-recheck" style="min-width:120px">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" style="margin-right:4px"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
           重新检测
         </button>
+        <button class="btn btn-ghost btn-sm" id="btn-skip-setup" style="min-width:120px">不再提示</button>
       </div>
     </div>
   `
 
   page.querySelector('#btn-recheck').addEventListener('click', () => runDetect(page))
+  page.querySelector('#btn-skip-setup').addEventListener('click', async () => {
+    const cfg = await api.readPanelConfig().catch(() => ({}))
+    await api.writePanelConfig({ ...cfg, Setup: true, forceSetup: false }).catch(() => {})
+    window.location.hash = '#/dashboard'
+  })
   runDetect(page)
   return page
 }
