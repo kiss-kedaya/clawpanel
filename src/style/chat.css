@@ -207,6 +207,10 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+[data-theme="light"] .msg-ai .msg-bubble {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
 /* AI 气泡内 Markdown 排版 */
 .msg-ai .msg-bubble p {
   margin: 0 0 8px 0;
