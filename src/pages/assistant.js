@@ -10,6 +10,7 @@ import { api } from '../lib/tauri-api.js'
 import { OPENCLAW_KB } from '../lib/openclaw-kb.js'
 import { icon, statusIcon } from '../lib/icons.js'
 import { QTCOOL, PROVIDER_PRESETS, API_TYPES as SHARED_API_TYPES, fetchQtcoolModels } from '../lib/model-presets.js'
+import { buildSystemPrompt as buildSystemPromptCore, getEnabledTools as getEnabledToolsCore, callAIWithTools as callAIWithToolsCore, callAI as callAICore, trimContext as trimContextCore } from '../lib/assistant-core.js'
 
 // ── 常量 ──
 const STORAGE_KEY = 'clawpanel-assistant'
@@ -714,35 +715,7 @@ function currentMode() {
 }
 
 function getEnabledTools() {
-  const mode = MODES[currentMode()]
-  if (!mode.tools) return [] // 聊天模式：无工具
-
-  const t = _config.tools || {}
-  const tools = [...TOOL_DEFS.system, ...TOOL_DEFS.process, ...TOOL_DEFS.interaction]
-
-  // 终端工具：受设置开关控制（优先级高于模式）
-  if (t.terminal !== false) tools.push(...TOOL_DEFS.terminal)
-
-  // 联网搜索工具：受设置开关控制
-  if (t.webSearch !== false) tools.push(...TOOL_DEFS.webSearch)
-
-  // 文件工具：受设置开关控制 + 规划模式排除写入
-  if (t.fileOps !== false) {
-    if (mode.readOnly) {
-      tools.push(...TOOL_DEFS.fileOps.filter(td => td.function.name !== 'write_file'))
-    } else {
-      tools.push(...TOOL_DEFS.fileOps)
-    }
-  }
-
-  // Skills 管理工具：始终启用（规划模式下排除安装操作）
-  if (mode.readOnly) {
-    tools.push(...TOOL_DEFS.skills.filter(td => !['skills_install_dep', 'skills_clawhub_install'].includes(td.function.name)))
-  } else {
-    tools.push(...TOOL_DEFS.skills)
-  }
-
-  return tools
+  return getEnabledToolsCore({ config: _config, mode: currentMode() })
 }
 
 function applyModeStyle(page, modeKey) {
@@ -837,6 +810,8 @@ function playModeTransition(page, modeKey) {
 }
 
 function buildSystemPrompt() {
+  return buildSystemPromptCore({ config: _config, soulCache: _soulCache, knowledgeBase: OPENCLAW_KB })
+
   let prompt = ''
 
   // 灵魂移植模式：用 OpenClaw Agent 的身份替代默认人设
@@ -1503,6 +1478,15 @@ const TIMEOUT_CHUNK = 30_000     // 流式 chunk 间隔超时 30 秒
 const TIMEOUT_CONNECT = 30_000   // 连接超时 30 秒
 
 async function callAI(sessionId, messages, onChunk) {
+  const { text } = await callAICore({
+    config: _config,
+    messages,
+    adapters: { soulCache: _soulCache, knowledgeBase: OPENCLAW_KB },
+    mode: currentMode(),
+  })
+  if (typeof onChunk === 'function' && text) onChunk(text)
+  return
+
   const apiType = normalizeApiType(_config.apiType)
   if (!_config.baseUrl || !_config.model || (requiresApiKey(apiType) && !_config.apiKey)) {
     throw new Error('请先配置 AI 模型（点击右上角设置按钮）')
@@ -2087,227 +2071,54 @@ async function executeToolWithSafety(toolName, args, tcForConfirm) {
 
 // 带工具调用的 AI 请求（非流式，用于 tool_calls 检测循环）
 async function callAIWithTools(sessionId, messages, onStatus, onToolProgress) {
-  const apiType = normalizeApiType(_config.apiType)
-  if (!_config.baseUrl || !_config.model || (requiresApiKey(apiType) && !_config.apiKey)) {
-    throw new Error('请先配置 AI 模型（点击右上角设置按钮）')
-  }
-
-  const base = cleanBaseUrl(_config.baseUrl, apiType)
-  const tools = getEnabledTools()
-  let currentMessages = [{ role: 'system', content: buildSystemPrompt() }, ...messages]
   const toolHistory = []
-  let controller = null
-
-  const autoRounds = _config.autoRounds ?? 8  // 0 = 无限制
-  let nextPauseAt = autoRounds   // 下一次暂停的轮次阈值
-  try {
-    for (let round = 0; ; round++) {
-      // 检查是否已被用户中止
-      const active = sessionId ? getAbortController(sessionId) : null
-      if (!sessionId || !getStreaming(sessionId) || active?.signal?.aborted) {
-        throw new DOMException('Aborted', 'AbortError')
+  const adapters = {
+    soulCache: _soulCache,
+    knowledgeBase: OPENCLAW_KB,
+    confirm: async (text) => {
+      const session = getCurrentSession()
+      if (session) setSessionStatus(session.id, 'waiting')
+      const result = await showConfirm(text)
+      if (session) setSessionStatus(session.id, 'streaming')
+      return result
+    },
+    askUser: async (args) => {
+      const session = getCurrentSession()
+      if (session) setSessionStatus(session.id, 'waiting')
+      const result = await showAskUserCard(args)
+      if (session) setSessionStatus(session.id, 'streaming')
+      return result
+    },
+    execTool: async ({ name, args }) => {
+      toolHistory.push({ name, args, result: null, approved: true, pending: true })
+      if (typeof onToolProgress === 'function') onToolProgress(toolHistory)
+      let result = ''
+      try {
+        result = await executeTool(name, args)
+      } catch (err) {
+        result = `执行失败: ${typeof err === 'string' ? err : err.message || JSON.stringify(err)}`
       }
-    if (autoRounds > 0 && round >= nextPauseAt) {
-      const answer = await showAskUserCard({
-        question: `AI 已连续调用工具 ${round} 轮，可能陷入循环。你希望怎么做？`,
-        type: 'single',
-        options: [`继续执行 ${autoRounds} 轮`, '不再中断，一直执行', '让 AI 换个思路', '停止并总结'],
-      })
-      if (answer.includes('停止')) {
-        return { content: '用户要求停止工具调用，以下是目前的执行情况摘要。', toolHistory }
-      } else if (answer.includes('换个思路')) {
-        currentMessages.push({ role: 'user', content: '请换一种方法来解决这个问题，不要重复之前失败的操作。' })
-        nextPauseAt = round + autoRounds
-      } else if (answer.includes('不再中断')) {
-        nextPauseAt = Infinity
-      } else {
-        nextPauseAt = round + autoRounds
+      const last = toolHistory[toolHistory.length - 1]
+      if (last) {
+        last.result = result
+        last.pending = false
       }
-    }
-
-    controller = new AbortController()
-    _abortController = controller
-    if (sessionId) setAbortController(sessionId, controller)
-    onStatus(round === 0 ? 'AI 思考中...' : `AI 处理工具结果 (第${round + 1}轮)...`)
-
-    // ── Anthropic 工具调用 ──
-    if (apiType === 'anthropic-messages') {
-      const systemMsg = currentMessages.find(m => m.role === 'system')?.content || ''
-      const chatMsgs = currentMessages.filter(m => m.role !== 'system')
-      const body = {
-        model: _config.model,
-        max_tokens: 8192,
-        temperature: _config.temperature || 0.7,
-        messages: chatMsgs,
-      }
-      if (systemMsg) body.system = systemMsg
-      if (tools.length > 0) body.tools = convertToolsForAnthropic(tools)
-
-      const resp = await fetchWithRetry(base + '/messages', {
-        method: 'POST', headers: authHeaders(), body: JSON.stringify(body),
-        signal: controller.signal,
-      })
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '')
-        let errMsg = `API 错误 ${resp.status}`
-        try { errMsg = JSON.parse(errText).error?.message || errMsg } catch {}
-        throw new Error(errMsg)
-      }
-
-      const data = await resp.json()
-      const contentBlocks = data.content || []
-      const toolUses = contentBlocks.filter(b => b.type === 'tool_use')
-      const textContent = contentBlocks.filter(b => b.type === 'text').map(b => b.text).join('')
-
-      if (toolUses.length > 0) {
-        // 将 assistant 消息加入上下文
-        currentMessages.push({ role: 'assistant', content: contentBlocks })
-
-        const toolResults = []
-        for (const tu of toolUses) {
-          const args = tu.input || {}
-          toolHistory.push({ name: tu.name, args, result: null, approved: true, pending: true })
-          onToolProgress(toolHistory)
-
-          const { result, approved } = await executeToolWithSafety(tu.name, args)
-          const last = toolHistory[toolHistory.length - 1]
-          last.result = result; last.approved = approved; last.pending = false
-          onToolProgress(toolHistory)
-
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: tu.id,
-            content: typeof result === 'string' ? result : JSON.stringify(result),
-          })
-        }
-        currentMessages.push({ role: 'user', content: toolResults })
-        continue
-      }
-
-      return { content: textContent, toolHistory }
-    }
-
-    // ── Gemini 工具调用 ──
-    if (apiType === 'google-gemini') {
-      const systemMsg = currentMessages.find(m => m.role === 'system')?.content || ''
-      const chatMsgs = currentMessages.filter(m => m.role !== 'system')
-      const contents = chatMsgs.map(m => ({
-        role: m.role === 'assistant' ? 'model' : m.role === 'tool' ? 'function' : 'user',
-        parts: m.functionResponse
-          ? [{ functionResponse: m.functionResponse }]
-          : [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
-      }))
-      const body = { contents, generationConfig: { temperature: _config.temperature || 0.7 } }
-      if (systemMsg) body.systemInstruction = { parts: [{ text: systemMsg }] }
-      if (tools.length > 0) body.tools = convertToolsForGemini(tools)
-
-      const url = `${base}/models/${_config.model}:generateContent?key=${_config.apiKey}`
-      const resp = await fetchWithRetry(url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body), signal: controller.signal,
-      })
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '')
-        let errMsg = `API 错误 ${resp.status}`
-        try { errMsg = JSON.parse(errText).error?.message || errMsg } catch {}
-        throw new Error(errMsg)
-      }
-
-      const data = await resp.json()
-      const parts = data.candidates?.[0]?.content?.parts || []
-      const funcCalls = parts.filter(p => p.functionCall)
-      const textParts = parts.filter(p => p.text).map(p => p.text).join('')
-
-      if (funcCalls.length > 0) {
-        currentMessages.push({ role: 'assistant', content: textParts, _geminiParts: parts })
-
-        for (const fc of funcCalls) {
-          const args = fc.functionCall.args || {}
-          toolHistory.push({ name: fc.functionCall.name, args, result: null, approved: true, pending: true })
-          onToolProgress(toolHistory)
-
-          const { result, approved } = await executeToolWithSafety(fc.functionCall.name, args)
-          const last = toolHistory[toolHistory.length - 1]
-          last.result = result; last.approved = approved; last.pending = false
-          onToolProgress(toolHistory)
-
-          currentMessages.push({
-            role: 'tool',
-            content: typeof result === 'string' ? result : JSON.stringify(result),
-            functionResponse: { name: fc.functionCall.name, response: { result: typeof result === 'string' ? result : JSON.stringify(result) } },
-          })
-        }
-        continue
-      }
-
-      return { content: textParts, toolHistory }
-    }
-
-    // ── OpenAI 工具调用 ──
-    const body = {
-      model: _config.model,
-      messages: currentMessages,
-      temperature: _config.temperature || 0.7,
-    }
-    if (tools.length > 0) body.tools = tools
-
-    const resp = await fetchWithRetry(base + '/chat/completions', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '')
-      let errMsg = `API 错误 ${resp.status}`
-      try { errMsg = JSON.parse(errText).error?.message || errMsg } catch {}
-      throw new Error(errMsg)
-    }
-
-    const data = await resp.json()
-    const choice = data.choices?.[0]
-    const assistantMsg = choice?.message
-
-    if (!assistantMsg) throw new Error('AI 未返回有效响应')
-
-    if (assistantMsg.tool_calls && assistantMsg.tool_calls.length > 0) {
-      currentMessages.push(assistantMsg)
-
-      for (const tc of assistantMsg.tool_calls) {
-        let args
-        try { args = JSON.parse(tc.function.arguments) } catch { args = {} }
-        const toolName = tc.function.name
-
-        toolHistory.push({ name: toolName, args, result: null, approved: true, pending: true })
-        onToolProgress(toolHistory)
-
-        const { result, approved } = await executeToolWithSafety(toolName, args, tc)
-        const last = toolHistory[toolHistory.length - 1]
-        last.result = result; last.approved = approved; last.pending = false
-        onToolProgress(toolHistory)
-
-        currentMessages.push({
-          role: 'tool',
-          tool_call_id: tc.id,
-          content: typeof result === 'string' ? result : JSON.stringify(result),
-        })
-      }
-
-      continue
-    }
-
-    const content = assistantMsg.content || assistantMsg.reasoning_content || ''
-    return { content, toolHistory }
+      if (typeof onToolProgress === 'function') onToolProgress(toolHistory)
+      return result
+    },
   }
-  } finally {
-    if (sessionId && controller && getAbortController(sessionId) === controller) {
-      setAbortController(sessionId, null)
-    }
-  }
-}
+  if (typeof onStatus === 'function') onStatus('AI 思考中...')
+  const tools = getEnabledTools()
+  const result = await callAIWithToolsCore({
+    config: _config,
+    messages,
+    tools,
+    adapters,
+    mode: currentMode(),
+  })
+  return { content: result.text || '', toolHistory }
 
-// ── 渲染 ──
+  // ── 渲染 ──
 
 function renderSessionList() {
   if (!_sessionListEl) return
@@ -3569,14 +3380,16 @@ async function sendMessageDirect(text) {
 
   // 准备 AI 上下文（只保留 role + content，剔除内部字段）
   // 过滤掉空的 AI 回复，避免污染上下文导致模型也返回空
-  const contextMessages = session.messages
-    .filter(m => {
-      if (m.role === 'user') return true
-      if (m.role === 'assistant') return m.content && m.content.length > 0
-      return false
-    })
-    .slice(-MAX_CONTEXT_TOKENS)
-    .map(m => ({ role: m.role, content: m.content }))
+  const contextMessages = trimContextCore(
+    session.messages
+      .filter(m => {
+        if (m.role === 'user') return true
+        if (m.role === 'assistant') return m.content && m.content.length > 0
+        return false
+      })
+      .map(m => ({ role: m.role, content: m.content })),
+    MAX_CONTEXT_TOKENS
+  )
 
   // 添加空 AI 消息占位
   const aiMsg = { role: 'assistant', content: '', ts: Date.now() }
@@ -3719,9 +3532,10 @@ async function retryAIResponse(session) {
   if (!session?.id) return
   if (getStreaming(session.id)) return
 
-  const contextMessages = session.messages
-    .filter(m => m.role === 'user' || m.role === 'assistant')
-    .slice(-MAX_CONTEXT_TOKENS)
+  const contextMessages = trimContextCore(
+    session.messages.filter(m => m.role === 'user' || m.role === 'assistant'),
+    MAX_CONTEXT_TOKENS
+  )
 
   const aiMsg = { role: 'assistant', content: '', ts: Date.now() }
   session.messages.push(aiMsg)
