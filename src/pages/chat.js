@@ -75,6 +75,7 @@ let _virtualItems = []
 let _virtualTopSpacer = null
 let _virtualBottomSpacer = null
 let _virtualRenderPending = false
+let _autoScrollEnabled = true
 let _streamSafetyTimer = null, _unsubEvent = null, _unsubReady = null, _unsubStatus = null
 let _seenRunIds = new Set()
 let _pageActive = false
@@ -281,8 +282,12 @@ function bindEvents(page) {
   _messagesEl.addEventListener('scroll', () => {
     const { scrollTop, scrollHeight, clientHeight } = _messagesEl
     _scrollBtn.style.display = (scrollHeight - scrollTop - clientHeight < 80) ? 'none' : 'flex'
+    _autoScrollEnabled = isAtBottom()
   })
-  _scrollBtn.addEventListener('click', () => scrollToBottom())
+  _scrollBtn.addEventListener('click', () => {
+    _autoScrollEnabled = true
+    scrollToBottom(true)
+  })
   _messagesEl.addEventListener('click', () => hideCmdPanel())
   _messagesEl.addEventListener('click', (e) => {
     const target = e.target?.closest?.('.msg-spoiler')
@@ -1970,8 +1975,9 @@ function showCompactionHint(show) {
   }
 }
 
-function scrollToBottom() {
+function scrollToBottom(force = false) {
   if (!_messagesEl) return
+  if (!force && !_autoScrollEnabled) return
   requestAnimationFrame(() => { _messagesEl.scrollTop = _messagesEl.scrollHeight })
 }
 
@@ -2049,7 +2055,7 @@ function doVirtualRender() {
     })
     if (count) _virtualAvgHeight = Math.max(24, Math.round(total / count))
 
-    if (atBottom) {
+    if (atBottom && _autoScrollEnabled) {
       scrollToBottom()
     } else {
       const newTop = _virtualTopSpacer.offsetHeight
