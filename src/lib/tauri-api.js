@@ -102,11 +102,22 @@ async function invoke(cmd, args = {}) {
 
 // Web 模式：通过 Vite 开发服务器的 API 端点调用真实后端
 async function webInvoke(cmd, args) {
-  const resp = await fetch(`/__api/${cmd}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args),
-  })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 20000)
+  let resp
+  try {
+    resp = await fetch(`/__api/${cmd}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(args),
+      signal: controller.signal,
+    })
+  } catch (e) {
+    if (controller.signal.aborted) throw new Error('后端请求超时')
+    throw e
+  } finally {
+    clearTimeout(timeout)
+  }
   if (resp.status === 401) {
     // Tauri 模式下不触发登录浮层（Tauri 有自己的认证流程）
     if (!isTauri && window.__clawpanel_show_login) window.__clawpanel_show_login()

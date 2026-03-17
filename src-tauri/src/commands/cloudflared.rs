@@ -403,6 +403,16 @@ pub async fn cloudflared_start(config: CloudflaredStartConfig) -> Result<Value, 
         cmd.stderr(std::process::Stdio::piped());
         child = cmd.spawn().map_err(|e| format!("启动失败: {e}"))?;
 
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let mut reader = tokio::io::BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let mut state = STATE.lock().unwrap();
+                    state.last_error = Some(line);
+                }
+            });
+        }
+
         // parse stdout for url
         if let Some(stdout) = child.stdout.take() {
             let mut reader = tokio::io::BufReader::new(stdout).lines();

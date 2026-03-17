@@ -104,6 +104,7 @@ let _hostedRuntime = { ...HOSTED_RUNTIME_DEFAULT }
 let _hostedAutoTimer = null
 let _hostedLastTargetTs = 0
 let _hostedBusy = false
+let _hostedAbort = null
 let _currentAiBubble = null, _currentAiText = '', _currentAiImages = [], _currentAiVideos = [], _currentAiAudios = [], _currentAiFiles = [], _currentAiTools = [], _currentRunId = null
 let _isStreaming = false, _isSending = false, _messageQueue = [], _streamStartTime = 0
 let _lastRenderTime = 0, _renderPending = false, _lastHistoryHash = ''
@@ -2246,6 +2247,7 @@ function doVirtualRender() {
     let total = 0
     let count = 0
     items.slice(start, end).forEach(item => {
+      if (_virtualHeights.has(item.id)) return
       const el = item.node
       if (!el || !el.getBoundingClientRect) return
       const h = Math.max(1, Math.ceil(el.getBoundingClientRect().height))
@@ -2590,15 +2592,23 @@ async function callHostedAI(messages, onChunk) {
   const systemPrompt = messages.find(m => m.role === 'system')?.content || ''
   const chatMessages = messages.filter(m => m.role !== 'system')
 
-  if (apiType === 'anthropic-messages') {
-    await callAnthropicHosted(base, systemPrompt, chatMessages, config, onChunk)
-    return
+  if (_hostedAbort) { _hostedAbort.abort(); _hostedAbort = null }
+  _hostedAbort = new AbortController()
+  const signal = _hostedAbort.signal
+
+  try {
+    if (apiType === 'anthropic-messages') {
+      await callAnthropicHosted(base, systemPrompt, chatMessages, config, onChunk, signal)
+      return
+    }
+    if (apiType === 'google-gemini') {
+      await callGeminiHosted(base, systemPrompt, chatMessages, config, onChunk, signal)
+      return
+    }
+    await callChatCompletionsHosted(base, systemPrompt, chatMessages, config, onChunk, signal)
+  } finally {
+    _hostedAbort = null
   }
-  if (apiType === 'google-gemini') {
-    await callGeminiHosted(base, systemPrompt, chatMessages, config, onChunk)
-    return
-  }
-  await callChatCompletionsHosted(base, systemPrompt, chatMessages, config, onChunk)
 }
 
 async function loadHostedAssistantConfig() {
@@ -2674,34 +2684,44 @@ async function fetchWithRetry(url, options, retries = 2) {
       if (resp.ok || resp.status < 500 || i >= retries) return resp
       await new Promise(r => setTimeout(r, delays[i]))
     } catch (err) {
+      if (options?.signal?.aborted) throw err
       if (i >= retries) throw err
       await new Promise(r => setTimeout(r, delays[i]))
     }
   }
 }
 
-async function readSSEStream(resp, onEvent) {
+async function readSSEStream(resp, onEvent, signal) {
   const reader = resp.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-    for (const line of lines) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      if (!trimmed.startsWith('data:')) continue
-      const data = trimmed.slice(5).trim()
-      if (data === '[DONE]') return
-      try { onEvent(JSON.parse(data)) } catch {}
+  let aborted = false
+  const onAbort = () => { aborted = true }
+  if (signal) signal.addEventListener('abort', onAbort)
+  try {
+    while (true) {
+      if (aborted) break
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        if (!trimmed.startsWith('data:')) continue
+        const data = trimmed.slice(5).trim()
+        if (data === '[DONE]') return
+        try { onEvent(JSON.parse(data)) } catch {}
+      }
     }
+  } finally {
+    if (signal) signal.removeEventListener('abort', onAbort)
+    try { reader.cancel() } catch {}
   }
 }
 
-async function callChatCompletionsHosted(base, systemPrompt, messages, config, onChunk) {
+async function callChatCompletionsHosted(base, systemPrompt, messages, config, onChunk, signal) {
   const body = {
     model: config.model,
     messages: [systemPrompt ? { role: 'system', content: systemPrompt } : null, ...messages].filter(Boolean),
@@ -2712,6 +2732,7 @@ async function callChatCompletionsHosted(base, systemPrompt, messages, config, o
     method: 'POST',
     headers: authHeaders(config.apiType, config.apiKey),
     body: JSON.stringify(body),
+    signal,
   })
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '')
@@ -2722,10 +2743,10 @@ async function callChatCompletionsHosted(base, systemPrompt, messages, config, o
   await readSSEStream(resp, (json) => {
     const delta = json.choices?.[0]?.delta
     if (delta?.content) onChunk(delta.content)
-  })
+  }, signal)
 }
 
-async function callAnthropicHosted(base, systemPrompt, messages, config, onChunk) {
+async function callAnthropicHosted(base, systemPrompt, messages, config, onChunk, signal) {
   const body = {
     model: config.model,
     max_tokens: 4096,
@@ -2738,6 +2759,7 @@ async function callAnthropicHosted(base, systemPrompt, messages, config, onChunk
     method: 'POST',
     headers: authHeaders(config.apiType, config.apiKey),
     body: JSON.stringify(body),
+    signal,
   })
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '')
@@ -2750,10 +2772,10 @@ async function callAnthropicHosted(base, systemPrompt, messages, config, onChunk
       const delta = json.delta
       if (delta?.type === 'text_delta' && delta.text) onChunk(delta.text)
     }
-  })
+  }, signal)
 }
 
-async function callGeminiHosted(base, systemPrompt, messages, config, onChunk) {
+async function callGeminiHosted(base, systemPrompt, messages, config, onChunk, signal) {
   const contents = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }],
@@ -2768,6 +2790,7 @@ async function callGeminiHosted(base, systemPrompt, messages, config, onChunk) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal,
   })
   if (!resp.ok) {
     const errText = await resp.text().catch(() => '')
@@ -2778,7 +2801,7 @@ async function callGeminiHosted(base, systemPrompt, messages, config, onChunk) {
   await readSSEStream(resp, (json) => {
     const text = json.candidates?.[0]?.content?.parts?.[0]?.text
     if (text) onChunk(text)
-  })
+  }, signal)
 }
 
 function appendHostedOutput(text) {
@@ -2798,6 +2821,7 @@ export function cleanup() {
   if (_unsubReady) { _unsubReady(); _unsubReady = null }
   if (_unsubStatus) { _unsubStatus(); _unsubStatus = null }
   clearTimeout(_streamSafetyTimer)
+  if (_hostedAbort) { _hostedAbort.abort(); _hostedAbort = null }
   // 不断开 wsClient —— 它是全局单例，保持连接供下次进入复用
   _sessionKey = null
   _page = null

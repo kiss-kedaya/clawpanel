@@ -47,6 +47,7 @@ export class WsClient {
     this._challengeTimer = null
     this._wsId = 0
     this._autoPairAttempts = 0
+    this._autoPairing = false
     this._serverVersion = null
   }
 
@@ -236,7 +237,11 @@ export class WsClient {
   }
 
   async _autoPairAndReconnect() {
+    if (this._autoPairing) return
+    this._autoPairing = true
     this._autoPairAttempts++
+    this._flushPending()
+    this._clearReconnectTimer()
     try {
       console.log('[ws] 执行自动配对（第', this._autoPairAttempts, '次）...')
       const result = await api.autoPairDevice()
@@ -259,6 +264,8 @@ export class WsClient {
     } catch (e) {
       console.error('[ws] 自动配对失败:', e)
       this._setConnected(false, 'error', `配对失败: ${e}`)
+    } finally {
+      this._autoPairing = false
     }
   }
 
@@ -383,7 +390,13 @@ export class WsClient {
       const id = uuid()
       const timer = setTimeout(() => { this._pending.delete(id); reject(new Error('请求超时')) }, REQUEST_TIMEOUT)
       this._pending.set(id, { resolve, reject, timer })
-      this._ws.send(JSON.stringify({ type: 'req', id, method, params }))
+      try {
+        this._ws.send(JSON.stringify({ type: 'req', id, method, params }))
+      } catch (e) {
+        this._pending.delete(id)
+        clearTimeout(timer)
+        reject(e instanceof Error ? e : new Error('请求发送失败'))
+      }
     })
   }
 
