@@ -1127,20 +1127,21 @@ function handleEvent(msg) {
   if (event === 'agent' && payload?.stream === 'tool' && payload?.data?.toolCallId) {
     const ts = payload.ts
     const toolCallId = payload.data.toolCallId
-    const runKey = `${payload.runId}:${toolCallId}`
+    const runId = payload.runId || ''
+    const runKey = runId ? `${runId}:${toolCallId}` : toolCallId
     if (_toolEventSeen.has(runKey)) return
     _toolEventSeen.add(runKey)
-    if (ts) _toolEventTimes.set(toolCallId, ts)
-    const current = _toolEventData.get(toolCallId) || {}
+    if (ts) _toolEventTimes.set(runKey, ts)
+    const current = _toolEventData.get(runKey) || {}
     if (payload.data?.args && current.input == null) current.input = payload.data.args
     if (payload.data?.meta && current.output == null) current.output = payload.data.meta
     if (typeof payload.data?.isError === 'boolean' && current.status == null) current.status = payload.data.isError ? 'error' : 'ok'
     if (current.time == null) current.time = ts || null
-    _toolEventData.set(toolCallId, current)
-    if (payload.runId) {
-      const list = _toolRunIndex.get(payload.runId) || []
+    _toolEventData.set(runKey, current)
+    if (runId) {
+      const list = _toolRunIndex.get(runId) || []
       if (!list.includes(toolCallId)) list.push(toolCallId)
-      _toolRunIndex.set(payload.runId, list)
+      _toolRunIndex.set(runId, list)
     }
   }
 
@@ -1157,9 +1158,9 @@ function handleEvent(msg) {
   // Compaction 状态指示：上游 2026.3.12 新增 status_reaction 事件
   if (event === 'chat.status_reaction' || event === 'status_reaction') {
     const reaction = payload.reaction || payload.emoji || ''
-    if (reaction.includes('compact') || reaction === '🗜️' || reaction === '📦') {
+    if (reaction.includes('compact')) {
       showCompactionHint(true)
-    } else if (!reaction || reaction === 'thinking' || reaction === '💭') {
+    } else if (!reaction || reaction === 'thinking') {
       showCompactionHint(false)
     }
   }
@@ -1407,7 +1408,7 @@ function extractChatContent(message) {
           input: block.input || block.args || block.parameters || block.arguments || null,
           output: null,
           status: block.status || 'ok',
-          time: resolveToolTime(callId, message.timestamp),
+          time: resolveToolTime(callId, message.timestamp, message.runId),
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
@@ -1418,7 +1419,7 @@ function extractChatContent(message) {
           input: block.input || block.args || null,
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
-          time: resolveToolTime(resId, message.timestamp),
+          time: resolveToolTime(resId, message.timestamp, message.runId),
         })
       }
     }
@@ -1482,8 +1483,14 @@ function normalizeTime(raw) {
   return raw
 }
 
-function resolveToolTime(toolId, messageTimestamp) {
-  const eventTs = toolId ? _toolEventTimes.get(toolId) : null
+function resolveToolTime(toolId, messageTimestamp, runId) {
+  const key = runId ? `${runId}:${toolId}` : toolId
+  let eventTs = toolId ? _toolEventTimes.get(key) : null
+  if (!eventTs && runId) {
+    for (const [k, v] of _toolEventTimes.entries()) {
+      if (k.endsWith(`:${toolId}`)) { eventTs = v; break }
+    }
+  }
   return normalizeTime(eventTs) || normalizeTime(messageTimestamp) || null
 }
 
@@ -1688,8 +1695,8 @@ function dedupeHistory(messages) {
     if (!c.text && !c.images.length && !c.videos.length && !c.audios.length && !c.files.length && !c.tools.length) continue
     const tools = (c.tools || []).map(t => {
       const id = t.id || t.tool_call_id
-      const time = t.time || resolveToolTime(id, msg.timestamp)
-      return { ...t, time, messageTimestamp: msg.timestamp }
+      const time = t.time || resolveToolTime(id, msg.timestamp, msg.runId)
+      return { ...t, time, messageTimestamp: msg.timestamp, runId: msg.runId }
     })
     const last = deduped[deduped.length - 1]
     if (last && last.role === role) {
@@ -1724,7 +1731,7 @@ function extractContent(msg) {
         input: msg.input || msg.args || msg.parameters || null,
         output: output || msg.output || msg.result || null,
         status: msg.status || 'ok',
-        time: resolveToolTime(msg.tool_call_id || msg.toolCallId || msg.id, msg.timestamp),
+        time: resolveToolTime(msg.tool_call_id || msg.toolCallId || msg.id, msg.timestamp, msg.runId),
       })
     } else if (output && !tools[0].output) {
       tools[0].output = output
@@ -1760,7 +1767,7 @@ function extractContent(msg) {
           input: block.input || block.args || block.parameters || block.arguments || null,
           output: null,
           status: block.status || 'ok',
-          time: resolveToolTime(callId, msg.timestamp),
+          time: resolveToolTime(callId, msg.timestamp, msg.runId),
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
@@ -1771,7 +1778,7 @@ function extractContent(msg) {
           input: block.input || block.args || null,
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
-          time: resolveToolTime(resId, msg.timestamp),
+          time: resolveToolTime(resId, msg.timestamp, msg.runId),
         })
       }
     }
@@ -1976,12 +1983,19 @@ function appendFilesToEl(el, files) {
 function mergeToolEventData(entry) {
   const id = entry?.id || entry?.tool_call_id
   if (!id) return entry
-  const extra = _toolEventData.get(id)
+  const runId = entry?.runId || entry?.run_id || entry?.run || ''
+  const key = runId ? `${runId}:${id}` : id
+  let extra = _toolEventData.get(key)
+  if (!extra && runId) {
+    for (const [k, v] of _toolEventData.entries()) {
+      if (k.endsWith(`:${id}`)) { extra = v; break }
+    }
+  }
   if (!extra) return entry
   if (entry.input == null && extra.input != null) entry.input = extra.input
   if (entry.output == null && extra.output != null) entry.output = extra.output
   if (entry.status == null && extra.status != null) entry.status = extra.status
-  if (entry.time == null) entry.time = extra.time || _toolEventTimes.get(id) || null
+  if (entry.time == null) entry.time = extra.time || _toolEventTimes.get(key) || null
   return entry
 }
 
@@ -2016,7 +2030,7 @@ function collectToolsFromMessage(message, tools) {
         input,
         output: null,
         status: call.status || 'ok',
-        time: resolveToolTime(callId, message?.timestamp),
+        time: resolveToolTime(callId, message?.timestamp, message?.runId),
       })
     })
   }
@@ -2030,7 +2044,7 @@ function collectToolsFromMessage(message, tools) {
         input: res.input || res.args || null,
         output: res.output || res.result || res.content || null,
         status: res.status || 'ok',
-        time: resolveToolTime(resId, message?.timestamp),
+        time: resolveToolTime(resId, message?.timestamp, message?.runId),
       })
     })
   }
@@ -2051,7 +2065,7 @@ function appendToolsToEl(el, tools) {
     details.className = 'msg-tool-item'
     const summary = document.createElement('summary')
     const status = tool.status === 'error' ? '失败' : '成功'
-    const timeValue = getToolTime(tool) || resolveToolTime(tool.id || tool.tool_call_id, tool.messageTimestamp)
+    const timeValue = getToolTime(tool) || resolveToolTime(tool.id || tool.tool_call_id, tool.messageTimestamp, tool.runId)
     const timeText = timeValue ? formatTime(new Date(timeValue)) : ''
     summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status}${timeText ? ' · ' + timeText : ''}`
     const body = document.createElement('div')
