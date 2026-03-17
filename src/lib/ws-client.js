@@ -241,8 +241,17 @@ export class WsClient {
       if (cb) {
         this._pending.delete(msg.id)
         clearTimeout(cb.timer)
-        if (msg.ok) cb.resolve(msg.payload)
-        else cb.reject(new Error(msg.error?.message || msg.error?.code || 'request failed'))
+        if (msg.ok) {
+          cb.resolve(msg.payload)
+          if (cb.emitEvent) {
+            const base = (msg.payload && typeof msg.payload === 'object') ? { ...msg.payload } : { value: msg.payload }
+            const payload = { ...base, _req: cb.params, _method: cb.method }
+            const evt = { type: 'event', event: cb.method, payload }
+            this._eventListeners.forEach(fn => {
+              try { fn(evt) } catch (e) { console.error('[ws] handler error:', e) }
+            })
+          }
+        } else cb.reject(new Error(msg.error?.message || msg.error?.code || 'request failed'))
       }
       return
     }
@@ -413,12 +422,7 @@ export class WsClient {
         try {
           const sessionKey = this._sessionKey || `agent:main:main`
           const id = uuid()
-          this._ws.send(JSON.stringify({
-            type: 'req',
-            id,
-            method: 'chat.history',
-            params: { sessionKey, limit: 50 },
-          }))
+          this.request('chat.history', { sessionKey, limit: 50 }, { emitEvent: true }).catch(() => {})
         } catch {}
       }
     }, PING_INTERVAL)
@@ -431,7 +435,7 @@ export class WsClient {
     }
   }
 
-  request(method, params = {}) {
+  request(method, params = {}, options = {}) {
     return new Promise((resolve, reject) => {
       if (!this._ws || this._ws.readyState !== WebSocket.OPEN || !this._gatewayReady) {
         if (!this._intentionalClose && (this._reconnectAttempts > 0 || !this._gatewayReady)) {
@@ -439,7 +443,7 @@ export class WsClient {
           const unsub = this.onReady((hello, sessionKey, err) => {
             clearTimeout(waitTimeout); unsub()
             if (err?.error) { reject(new Error(err.message || 'Gateway 握手失败')); return }
-            this.request(method, params).then(resolve, reject)
+            this.request(method, params, options).then(resolve, reject)
           })
           return
         }
@@ -447,7 +451,7 @@ export class WsClient {
       }
       const id = uuid()
       const timer = setTimeout(() => { this._pending.delete(id); reject(new Error('请求超时')) }, REQUEST_TIMEOUT)
-      this._pending.set(id, { resolve, reject, timer })
+      this._pending.set(id, { resolve, reject, timer, method, params, emitEvent: !!options.emitEvent })
       try {
         this._ws.send(JSON.stringify({ type: 'req', id, method, params }))
       } catch (e) {

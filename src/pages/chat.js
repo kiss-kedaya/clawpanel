@@ -1152,6 +1152,13 @@ function handleEvent(msg) {
     }
   }
 
+  if (event === 'chat.history') {
+    const reqKey = payload?._req?.sessionKey || ''
+    if (reqKey && _sessionKey && reqKey !== _sessionKey) return
+    const hasExisting = _messagesEl?.querySelector?.('.msg')
+    applyHistoryResult(payload, hasExisting)
+  }
+
   if (event === 'chat') handleChatEvent(payload)
 
   if ((event === 'status' || event === 'gateway.status') && payload?.state === 'disconnected') {
@@ -1624,6 +1631,58 @@ function resetStreamState() {
 
 // ── 历史消息加载 ──
 
+function applyHistoryResult(result, hasExisting) {
+  if (!result?.messages?.length) {
+    if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('还没有消息，开始聊天吧')
+    return
+  }
+  const deduped = dedupeHistory(result.messages)
+  const hash = deduped.map(m => `${m.role}:${(m.text || '').length}`).join('|')
+  if (hash === _lastHistoryHash && hasExisting) return
+  _lastHistoryHash = hash
+
+  // 正在发送/流式输出时不全量重绘，避免覆盖本地乐观渲染
+  if (hasExisting && (_isSending || _isStreaming || _messageQueue.length > 0)) {
+    saveMessages(result.messages.map(m => {
+      const c = extractContent(m)
+      const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
+      return { id: m.id || uuid(), sessionKey: _sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
+    }))
+    return
+  }
+
+  clearMessages()
+  let hasOmittedImages = false
+  deduped.forEach(msg => {
+    if (!msg.text && !msg.images?.length && !msg.videos?.length && !msg.audios?.length && !msg.files?.length && !msg.tools?.length) return
+    const msgTime = msg.timestamp ? new Date(msg.timestamp) : new Date()
+    if (msg.role === 'user') {
+      const userAtts = msg.images?.length ? msg.images.map(i => ({
+        mimeType: i.mediaType || i.media_type || 'image/png',
+        content: i.data || i.source?.data || '',
+        category: 'image',
+      })).filter(a => a.content) : []
+      if (msg.images?.length && !userAtts.length) hasOmittedImages = true
+      appendUserMessage(msg.text, userAtts, msgTime)
+    } else if (msg.role === 'assistant') {
+      appendAiMessage(msg.text, msgTime, msg.images, msg.videos, msg.audios, msg.files, msg.tools)
+    } else if (msg.role === 'system') {
+      appendSystemMessage(msg.text || '', msgTime?.getTime?.() || Date.now())
+    } else {
+      appendSystemMessage(msg.text || '', msgTime?.getTime?.() || Date.now())
+    }
+  })
+  if (hasOmittedImages) {
+    appendSystemMessage('部分历史图片无法显示（Gateway 不保留图片原始数据，仅当前会话内可见）')
+  }
+  saveMessages(result.messages.map(m => {
+    const c = extractContent(m)
+    const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
+    return { id: m.id || uuid(), sessionKey: _sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
+  }))
+  scrollToBottom()
+}
+
 async function loadHistory() {
   if (!_sessionKey || !_messagesEl) return
   _isLoadingHistory = true
@@ -1651,56 +1710,7 @@ async function loadHistory() {
   if (!wsClient.gatewayReady) { _isLoadingHistory = false; return }
   try {
     const result = await wsClient.chatHistory(_sessionKey, 200)
-    if (!result?.messages?.length) {
-      if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('还没有消息，开始聊天吧')
-      return
-    }
-    const deduped = dedupeHistory(result.messages)
-    const hash = deduped.map(m => `${m.role}:${(m.text || '').length}`).join('|')
-    if (hash === _lastHistoryHash && hasExisting) return
-    _lastHistoryHash = hash
-
-    // 正在发送/流式输出时不全量重绘，避免覆盖本地乐观渲染
-    if (hasExisting && (_isSending || _isStreaming || _messageQueue.length > 0)) {
-      saveMessages(result.messages.map(m => {
-        const c = extractContent(m)
-        const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
-        return { id: m.id || uuid(), sessionKey: _sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
-      }))
-      _isLoadingHistory = false
-      return
-    }
-
-    clearMessages()
-    let hasOmittedImages = false
-    deduped.forEach(msg => {
-      if (!msg.text && !msg.images?.length && !msg.videos?.length && !msg.audios?.length && !msg.files?.length && !msg.tools?.length) return
-      const msgTime = msg.timestamp ? new Date(msg.timestamp) : new Date()
-      if (msg.role === 'user') {
-        const userAtts = msg.images?.length ? msg.images.map(i => ({
-          mimeType: i.mediaType || i.media_type || 'image/png',
-          content: i.data || i.source?.data || '',
-          category: 'image',
-        })).filter(a => a.content) : []
-        if (msg.images?.length && !userAtts.length) hasOmittedImages = true
-        appendUserMessage(msg.text, userAtts, msgTime)
-      } else if (msg.role === 'assistant') {
-        appendAiMessage(msg.text, msgTime, msg.images, msg.videos, msg.audios, msg.files, msg.tools)
-      } else if (msg.role === 'system') {
-        appendSystemMessage(msg.text || '', msgTime?.getTime?.() || Date.now())
-      } else {
-        appendSystemMessage(msg.text || '', msgTime?.getTime?.() || Date.now())
-      }
-    })
-    if (hasOmittedImages) {
-      appendSystemMessage('部分历史图片无法显示（Gateway 不保留图片原始数据，仅当前会话内可见）')
-    }
-    saveMessages(result.messages.map(m => {
-      const c = extractContent(m)
-      const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
-      return { id: m.id || uuid(), sessionKey: _sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
-    }))
-    scrollToBottom()
+    applyHistoryResult(result, hasExisting)
   } catch (e) {
     console.error('[chat] loadHistory error:', e)
     if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('加载历史失败: ' + e.message)
