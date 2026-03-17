@@ -4,7 +4,7 @@
 
 **Goal:** Implement virtual scrolling for chat messages with fixed window size (40 + overscan 20), fast first paint, and stable scroll anchoring.
 
-**Architecture:** Use a virtualized list with top/bottom spacers, measured row heights cached by message id, and average height fallback. Update range on scroll, and preserve anchor when not at bottom.
+**Architecture:** Use a virtualized list with top/bottom spacers and total height based on cumulative measured heights (fallback to average). Range calculation uses cumulative heights (prefix sums/binary search) instead of pure avg height. Preserve anchor when not at bottom.
 
 **Tech Stack:** JS, Vite
 
@@ -34,31 +34,60 @@ Add:
 - `let _virtualAvgHeight = 64`
 - `let _virtualRange = { start: 0, end: 0 }`
 
-- [ ] **Step 2: Compute range**
+- [ ] **Step 2: Compute cumulative heights**
 
-Implement function:
+Implement prefix sum using measured heights with avg fallback:
 
 ```js
-function computeVirtualRange(total, scrollTop, viewportHeight) {
-  const approxStart = Math.max(0, Math.floor(scrollTop / _virtualAvgHeight) - VIRTUAL_OVERSCAN)
-  const approxEnd = Math.min(total, approxStart + VIRTUAL_WINDOW + VIRTUAL_OVERSCAN * 2)
-  return { start: approxStart, end: approxEnd }
+function getItemHeight(idx, items) {
+  const id = items[idx]?.id
+  return _virtualHeights.get(id) || _virtualAvgHeight
+}
+
+function buildPrefixHeights(items) {
+  const prefix = [0]
+  for (let i = 0; i < items.length; i++) {
+    prefix[i + 1] = prefix[i] + getItemHeight(i, items)
+  }
+  return prefix
 }
 ```
 
-- [ ] **Step 3: Spacer heights**
-
-Implement:
+- [ ] **Step 3: Range calculation by cumulative heights**
 
 ```js
-function getSpacerHeight(start, end, total) {
-  const top = start * _virtualAvgHeight
-  const bottom = (total - end) * _virtualAvgHeight
-  return { top, bottom }
+function findStartIndex(prefix, scrollTop) {
+  let lo = 0, hi = prefix.length - 1
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    if (prefix[mid] <= scrollTop) lo = mid + 1
+    else hi = mid
+  }
+  return Math.max(0, lo - 1)
+}
+
+function computeVirtualRange(items, scrollTop, viewportHeight) {
+  const prefix = buildPrefixHeights(items)
+  const start = Math.max(0, findStartIndex(prefix, scrollTop) - VIRTUAL_OVERSCAN)
+  let end = start
+  const maxY = scrollTop + viewportHeight
+  while (end < items.length && prefix[end] < maxY + _virtualAvgHeight * VIRTUAL_OVERSCAN) end++
+  return { start, end, prefix }
 }
 ```
 
-- [ ] **Step 4: Measure heights**
+- [ ] **Step 4: Spacer heights + total height**
+
+```js
+function getSpacerHeights(prefix, start, end) {
+  const top = prefix[start]
+  const total = prefix[prefix.length - 1]
+  const bottom = Math.max(0, total - prefix[end])
+  return { top, bottom, total }
+}
+```
+
+- [ ] **Step 5: Measure heights**
 
 After render, measure visible message nodes and update `_virtualHeights` and `_virtualAvgHeight`.
 
