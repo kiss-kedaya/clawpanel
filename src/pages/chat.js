@@ -1424,6 +1424,8 @@ function extractChatContent(message) {
           output: null,
           status: block.status || 'ok',
           time: resolveToolTime(callId, message.timestamp, message.runId),
+          runId: message.runId,
+          messageTimestamp: message.timestamp,
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
@@ -1435,6 +1437,8 @@ function extractChatContent(message) {
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
           time: resolveToolTime(resId, message.timestamp, message.runId),
+          runId: message.runId,
+          messageTimestamp: message.timestamp,
         })
       }
     }
@@ -1747,6 +1751,8 @@ function extractContent(msg) {
         output: output || msg.output || msg.result || null,
         status: msg.status || 'ok',
         time: resolveToolTime(msg.tool_call_id || msg.toolCallId || msg.id, msg.timestamp, msg.runId),
+        runId: msg.runId,
+        messageTimestamp: msg.timestamp,
       })
     } else if (output && !tools[0].output) {
       tools[0].output = output
@@ -2019,7 +2025,12 @@ function upsertTool(tools, entry) {
   const id = entry.id || entry.tool_call_id
   let target = null
   if (id) target = tools.find(t => t.id === id || t.tool_call_id === id)
-  if (!target && entry.name) target = tools.find(t => t.name === entry.name && !t.output)
+  if (!target && entry.name && entry.runId) {
+    target = tools.find(t => t.name === entry.name && t.runId === entry.runId && !t.output)
+  }
+  if (!target && entry.name && entry.messageTimestamp) {
+    target = tools.find(t => t.name === entry.name && t.messageTimestamp === entry.messageTimestamp && !t.output)
+  }
   if (target) {
     if (entry.input != null && target.input == null) target.input = entry.input
     if (entry.output != null && target.output == null) target.output = entry.output
@@ -2046,6 +2057,8 @@ function collectToolsFromMessage(message, tools) {
         output: null,
         status: call.status || 'ok',
         time: resolveToolTime(callId, message?.timestamp, message?.runId),
+        runId: message?.runId,
+        messageTimestamp: message?.timestamp,
       })
     })
   }
@@ -2060,6 +2073,8 @@ function collectToolsFromMessage(message, tools) {
         output: res.output || res.result || res.content || null,
         status: res.status || 'ok',
         time: resolveToolTime(resId, message?.timestamp, message?.runId),
+        runId: message?.runId,
+        messageTimestamp: message?.timestamp,
       })
     })
   }
