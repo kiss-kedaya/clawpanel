@@ -62,6 +62,7 @@ let _modelSelectEl = null
 let _currentAiBubble = null, _currentAiText = '', _currentAiImages = [], _currentAiVideos = [], _currentAiAudios = [], _currentAiFiles = [], _currentAiTools = [], _currentRunId = null
 let _isStreaming = false, _isSending = false, _messageQueue = [], _streamStartTime = 0
 let _lastRenderTime = 0, _renderPending = false, _lastHistoryHash = ''
+let _isLoadingHistory = false
 let _streamSafetyTimer = null, _unsubEvent = null, _unsubReady = null, _unsubStatus = null
 let _seenRunIds = new Set()
 let _pageActive = false
@@ -934,7 +935,7 @@ function handleEvent(msg) {
     }
     const name = payload.data?.name || '工具'
     const phase = payload.data?.phase || 'unknown'
-    appendSystemMessage(`${name} · ${phase}`, ts)
+    if (!_isLoadingHistory) appendSystemMessage(`${name} · ${phase}`, ts)
   }
 
   if (event === 'chat') handleChatEvent(payload)
@@ -1171,14 +1172,13 @@ function collectToolsFromMessage(message, tools) {
       const name = call.name || call.tool || call.tool_name || fn?.name
       const input = call.input || call.args || call.parameters || call.arguments || fn?.arguments || null
       const callId = call.id || call.tool_call_id
-      const fallbackTime = callId ? _toolEventTimes.get(callId) : null
       upsertTool(tools, {
         id: callId,
         name: name || '工具',
         input,
         output: null,
         status: call.status || 'ok',
-        time: call.time || fallbackTime || null,
+        time: resolveToolTime(callId, message?.timestamp),
       })
     })
   }
@@ -1186,14 +1186,13 @@ function collectToolsFromMessage(message, tools) {
   if (Array.isArray(toolResults)) {
     toolResults.forEach(res => {
       const resId = res.id || res.tool_call_id
-      const fallbackTime = resId ? _toolEventTimes.get(resId) : null
       upsertTool(tools, {
         id: resId,
         name: res.name || res.tool || res.tool_name || '工具',
         input: res.input || res.args || null,
         output: res.output || res.result || res.content || null,
         status: res.status || 'ok',
-        time: res.time || fallbackTime || null,
+        time: resolveToolTime(resId, message?.timestamp),
       })
     })
   }
@@ -1243,26 +1242,24 @@ function extractChatContent(message) {
       }
       else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
         const callId = block.id || block.tool_call_id || block.toolCallId
-        const fallbackTime = callId ? _toolEventTimes.get(callId) : null
         upsertTool(tools, {
           id: callId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || block.parameters || block.arguments || null,
           output: null,
           status: block.status || 'ok',
-          time: block.time || fallbackTime || null,
+          time: resolveToolTime(callId, message.timestamp),
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
         const resId = block.id || block.tool_call_id || block.toolCallId
-        const fallbackTime = resId ? _toolEventTimes.get(resId) : null
         upsertTool(tools, {
           id: resId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || null,
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
-          time: block.time || fallbackTime || null,
+          time: resolveToolTime(resId, message.timestamp),
         })
       }
     }
@@ -1311,11 +1308,29 @@ function stripThinkingTags(text) {
     .trim()
 }
 
-function getToolTime(tool) {
-  const raw = tool?.end_time || tool?.endTime || tool?.timestamp || tool?.time || tool?.started_at || tool?.startedAt || null
+function normalizeTime(raw) {
   if (!raw) return null
+  if (raw instanceof Date) return raw.getTime()
+  if (typeof raw === 'string') {
+    const num = Number(raw)
+    if (!Number.isNaN(num)) raw = num
+    else {
+      const parsed = Date.parse(raw)
+      return Number.isNaN(parsed) ? null : parsed
+    }
+  }
   if (typeof raw === 'number' && raw < 1e12) return raw * 1000
   return raw
+}
+
+function resolveToolTime(toolId, messageTimestamp) {
+  const eventTs = toolId ? _toolEventTimes.get(toolId) : null
+  return normalizeTime(eventTs) || normalizeTime(messageTimestamp) || null
+}
+
+function getToolTime(tool) {
+  const raw = tool?.end_time || tool?.endTime || tool?.timestamp || tool?.time || tool?.started_at || tool?.startedAt || null
+  return normalizeTime(raw)
 }
 
 function formatTime(date) {
@@ -1406,6 +1421,7 @@ function resetStreamState() {
 
 async function loadHistory() {
   if (!_sessionKey || !_messagesEl) return
+  _isLoadingHistory = true
   const hasExisting = _messagesEl.querySelector('.msg')
   if (!hasExisting && isStorageAvailable()) {
     const local = await getLocalMessages(_sessionKey, 200)
@@ -1474,6 +1490,8 @@ async function loadHistory() {
   } catch (e) {
     console.error('[chat] loadHistory error:', e)
     if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('加载历史失败: ' + e.message)
+  } finally {
+    _isLoadingHistory = false
   }
 }
 
@@ -1483,6 +1501,11 @@ function dedupeHistory(messages) {
     const role = (msg.role === 'tool' || msg.role === 'toolResult') ? 'assistant' : msg.role
     const c = extractContent(msg)
     if (!c.text && !c.images.length && !c.videos.length && !c.audios.length && !c.files.length && !c.tools.length) continue
+    const tools = (c.tools || []).map(t => {
+      const id = t.id || t.tool_call_id
+      const time = t.time || resolveToolTime(id, msg.timestamp)
+      return { ...t, time, messageTimestamp: msg.timestamp }
+    })
     const last = deduped[deduped.length - 1]
     if (last && last.role === role) {
       if (role === 'user' && last.text === c.text) continue
@@ -1495,11 +1518,11 @@ function dedupeHistory(messages) {
         last.videos = [...(last.videos || []), ...c.videos]
         last.audios = [...(last.audios || []), ...c.audios]
         last.files = [...(last.files || []), ...c.files]
-        last.tools = [...(last.tools || []), ...(c.tools || [])]
+        tools.forEach(t => upsertTool(last.tools, t))
         continue
       }
     }
-    deduped.push({ role, text: c.text, images: c.images, videos: c.videos, audios: c.audios, files: c.files, tools: c.tools || [], timestamp: msg.timestamp })
+    deduped.push({ role, text: c.text, images: c.images, videos: c.videos, audios: c.audios, files: c.files, tools, timestamp: msg.timestamp })
   }
   return deduped
 }
@@ -1510,11 +1533,13 @@ function extractContent(msg) {
   if (msg.role === 'tool' || msg.role === 'toolResult') {
     const output = typeof msg.content === 'string' ? msg.content : null
     if (!tools.length) {
-      tools.push({
+      upsertTool(tools, {
+        id: msg.id || msg.tool_call_id || msg.toolCallId,
         name: msg.name || msg.tool || msg.tool_name || '工具',
         input: msg.input || msg.args || msg.parameters || null,
         output: output || msg.output || msg.result || null,
         status: msg.status || 'ok',
+        time: resolveToolTime(msg.tool_call_id || msg.toolCallId || msg.id, msg.timestamp),
       })
     } else if (output && !tools[0].output) {
       tools[0].output = output
@@ -1544,26 +1569,24 @@ function extractContent(msg) {
       }
       else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
         const callId = block.id || block.tool_call_id || block.toolCallId
-        const fallbackTime = callId ? _toolEventTimes.get(callId) : null
         upsertTool(tools, {
           id: callId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || block.parameters || block.arguments || null,
           output: null,
           status: block.status || 'ok',
-          time: block.time || fallbackTime || null,
+          time: resolveToolTime(callId, msg.timestamp),
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
         const resId = block.id || block.tool_call_id || block.toolCallId
-        const fallbackTime = resId ? _toolEventTimes.get(resId) : null
         upsertTool(tools, {
           id: resId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
           input: block.input || block.args || null,
           output: block.output || block.result || block.content || null,
           status: block.status || 'ok',
-          time: block.time || fallbackTime || null,
+          time: resolveToolTime(resId, msg.timestamp),
         })
       }
     }
@@ -1655,12 +1678,15 @@ function appendAiMessage(text, msgTime, images, videos, audios, files, tools) {
   wrap.className = 'msg msg-ai'
   const bubble = document.createElement('div')
   bubble.className = 'msg-bubble'
-  bubble.innerHTML = renderMarkdown(text)
+  appendToolsToEl(bubble, tools)
+  const textEl = document.createElement('div')
+  textEl.className = 'msg-text'
+  textEl.innerHTML = renderMarkdown(text || '')
+  bubble.appendChild(textEl)
   appendImagesToEl(bubble, images)
   appendVideosToEl(bubble, videos)
   appendAudiosToEl(bubble, audios)
   appendFilesToEl(bubble, files)
-  appendToolsToEl(bubble, tools)
   // 图片点击灯箱
   bubble.querySelectorAll('img').forEach(img => { if (!img.onclick) img.onclick = () => showLightbox(img.src) })
 
@@ -1761,7 +1787,12 @@ function appendFilesToEl(el, files) {
 
 /** 渲染工具调用到消息气泡 */
 function appendToolsToEl(el, tools) {
-  if (!el || !tools?.length) return
+  if (!el) return
+  const existing = el.querySelector?.('.msg-tool')
+  if (!tools?.length) {
+    if (existing) existing.remove()
+    return
+  }
   const container = document.createElement('div')
   container.className = 'msg-tool'
   tools.forEach(tool => {
@@ -1771,7 +1802,7 @@ function appendToolsToEl(el, tools) {
     details.removeAttribute('open')
     const summary = document.createElement('summary')
     const status = tool.status === 'error' ? '失败' : '成功'
-    const timeValue = getToolTime(tool)
+    const timeValue = getToolTime(tool) || resolveToolTime(tool.id || tool.tool_call_id, tool.messageTimestamp)
     const timeText = timeValue ? formatTime(new Date(timeValue)) : '时间未知'
     summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status} · ${timeText}`
     const body = document.createElement('div')
@@ -1803,7 +1834,8 @@ function appendToolsToEl(el, tools) {
     })
     container.appendChild(details)
   })
-  el.appendChild(container)
+  if (existing) existing.remove()
+  el.insertBefore(container, el.firstChild)
   try {
     const first = container.querySelector('details')
     if (first) {
