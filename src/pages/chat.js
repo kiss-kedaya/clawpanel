@@ -1416,11 +1416,11 @@ function extractChatContent(message) {
         files.push({ url: block.url || '', name: block.fileName || block.name || '文件', mimeType: block.mimeType || '', size: block.size, data: block.data })
       }
       else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
-        const callId = block.id || block.tool_call_id || block.toolCallId
+        const callId = block.id || block.tool_call_id || block.toolCallId || block.tool_use_id || block.toolUseId
         upsertTool(tools, {
           id: callId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
-          input: block.input || block.args || block.parameters || block.arguments || null,
+          input: block.input || block.args || block.parameters || block.arguments || block.meta?.input || null,
           output: null,
           status: block.status || 'ok',
           time: resolveToolTime(callId, message.timestamp, message.runId),
@@ -1429,12 +1429,12 @@ function extractChatContent(message) {
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
-        const resId = block.id || block.tool_call_id || block.toolCallId
+        const resId = block.id || block.tool_call_id || block.toolCallId || block.result_id || block.resultId
         upsertTool(tools, {
           id: resId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
-          input: block.input || block.args || null,
-          output: block.output || block.result || block.content || null,
+          input: block.input || block.args || block.meta?.input || null,
+          output: block.output || block.result || block.content || block.meta?.output || null,
           status: block.status || 'ok',
           time: resolveToolTime(resId, message.timestamp, message.runId),
           runId: message.runId,
@@ -1781,23 +1781,23 @@ function extractContent(msg) {
         files.push({ url: block.url || '', name: block.fileName || block.name || '文件', mimeType: block.mimeType || '', size: block.size, data: block.data })
       }
       else if (block.type === 'tool' || block.type === 'tool_use' || block.type === 'tool_call' || block.type === 'toolCall') {
-        const callId = block.id || block.tool_call_id || block.toolCallId
+        const callId = block.id || block.tool_call_id || block.toolCallId || block.tool_use_id || block.toolUseId
         upsertTool(tools, {
           id: callId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
-          input: block.input || block.args || block.parameters || block.arguments || null,
+          input: block.input || block.args || block.parameters || block.arguments || block.meta?.input || null,
           output: null,
           status: block.status || 'ok',
           time: resolveToolTime(callId, msg.timestamp, msg.runId),
         })
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
-        const resId = block.id || block.tool_call_id || block.toolCallId
+        const resId = block.id || block.tool_call_id || block.toolCallId || block.result_id || block.resultId
         upsertTool(tools, {
           id: resId,
           name: block.name || block.tool || block.tool_name || block.toolName || '工具',
-          input: block.input || block.args || null,
-          output: block.output || block.result || block.content || null,
+          input: block.input || block.args || block.meta?.input || null,
+          output: block.output || block.result || block.content || block.meta?.output || null,
           status: block.status || 'ok',
           time: resolveToolTime(resId, msg.timestamp, msg.runId),
         })
@@ -2049,11 +2049,11 @@ function collectToolsFromMessage(message, tools) {
       const fn = call.function || null
       const name = call.name || call.tool || call.tool_name || fn?.name
       const input = call.input || call.args || call.parameters || call.arguments || fn?.arguments || null
-      const callId = call.id || call.tool_call_id
+      const callId = call.id || call.tool_call_id || call.tool_use_id || call.toolUseId
       upsertTool(tools, {
         id: callId,
         name: name || '工具',
-        input,
+        input: input || call.meta?.input || null,
         output: null,
         status: call.status || 'ok',
         time: resolveToolTime(callId, message?.timestamp, message?.runId),
@@ -2065,12 +2065,12 @@ function collectToolsFromMessage(message, tools) {
   const toolResults = message.tool_results || message.toolResults
   if (Array.isArray(toolResults)) {
     toolResults.forEach(res => {
-      const resId = res.id || res.tool_call_id
+      const resId = res.id || res.tool_call_id || res.result_id || res.resultId
       upsertTool(tools, {
         id: resId,
         name: res.name || res.tool || res.tool_name || '工具',
-        input: res.input || res.args || null,
-        output: res.output || res.result || res.content || null,
+        input: res.input || res.args || res.meta?.input || null,
+        output: res.output || res.result || res.content || res.meta?.output || null,
         status: res.status || 'ok',
         time: resolveToolTime(resId, message?.timestamp, message?.runId),
         runId: message?.runId,
