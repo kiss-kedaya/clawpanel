@@ -1695,7 +1695,7 @@ function applyHistoryResult(result, hasExisting) {
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .slice(-50)
       .map(m => ({
-        role: m.role === 'user' ? 'assistant' : 'target',
+        role: m.role,
         content: m.text || '',
         ts: m.timestamp || Date.now(),
       }))
@@ -2673,7 +2673,7 @@ function shouldCaptureHostedTarget(payload) {
 function appendHostedTarget(text, ts) {
   if (!_hostedSessionConfig) return
   if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
-  _hostedSessionConfig.history.push({ role: 'target', content: text, ts: ts || Date.now() })
+  _hostedSessionConfig.history.push({ role: 'assistant', content: text, ts: ts || Date.now() })
   trimHostedHistoryByTokens()
   persistHostedRuntime()
 }
@@ -2697,13 +2697,20 @@ function maybeTriggerHostedRun() {
   runHostedAgentStep()
 }
 
+function normalizeHostedRole(role) {
+  if (role === 'assistant' || role === 'user') return role
+  if (role === 'developer') return 'assistant'
+  return 'user'
+}
+
 function buildHostedMessages() {
   trimHostedHistoryByTokens()
   const history = _hostedSessionConfig?.history || []
   const systemPrompt = resolveHostedSystemPrompt()
   const mapped = history.map(item => {
-    if (item.role === 'assistant') return { role: 'assistant', content: item.content }
-    return { role: 'user', content: item.content }
+    const role = normalizeHostedRole(item.role)
+    const prefix = `[${(item.role || role).toUpperCase()}] `
+    return { role, content: prefix + (item.content || '') }
   })
   if (systemPrompt) mapped.unshift({ role: 'system', content: systemPrompt })
   return mapped
@@ -2781,7 +2788,7 @@ async function runHostedAgentStep() {
     _hostedRuntime.lastError = ''
 
     const rendered = renderHostedTemplate(parsed)
-    _hostedSessionConfig.history.push({ role: 'assistant', content: rendered, ts: Date.now() })
+    _hostedSessionConfig.history.push({ role: 'developer', content: rendered, ts: Date.now() })
     trimHostedHistoryByTokens()
     persistHostedRuntime()
 
@@ -2830,7 +2837,14 @@ async function callHostedAI(messages, onChunk) {
   }
   const base = cleanBaseUrl(config.baseUrl, apiType)
   const systemPrompt = messages.find(m => m.role === 'system')?.content || ''
-  const chatMessages = messages.filter(m => m.role !== 'system')
+  let chatMessages = messages.filter(m => m.role !== 'system')
+
+  if (apiType === 'anthropic-messages' || apiType === 'google-gemini') {
+    chatMessages = chatMessages.map(m => ({
+      ...m,
+      role: m.role === 'developer' ? 'assistant' : m.role,
+    }))
+  }
 
   if (_hostedAbort) { _hostedAbort.abort(); _hostedAbort = null }
   _hostedAbort = new AbortController()
