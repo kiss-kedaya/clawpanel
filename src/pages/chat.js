@@ -45,6 +45,7 @@ const HOSTED_RUNTIME_DEFAULT = {
   status: HOSTED_STATUS.IDLE,
   stepCount: 0,
   lastRunAt: 0,
+  lastRunId: '',
   lastError: '',
   pending: false,
   errorCount: 0,
@@ -2581,6 +2582,21 @@ async function runHostedAgentStep() {
   if (_hostedBusy || !_hostedSessionConfig?.enabled) return
   const prompt = (_hostedSessionConfig.prompt || '').trim()
   if (!prompt) return
+  if (!wsClient.gatewayReady || !_sessionKey) {
+    _hostedRuntime.status = HOSTED_STATUS.PAUSED
+    _hostedRuntime.lastError = 'Gateway 未就绪或 sessionKey 缺失'
+    persistHostedRuntime()
+    updateHostedBadge()
+    appendHostedOutput(`[托管 Agent] 需要人工介入: Gateway 未就绪或 sessionKey 缺失${formatHostedSummary()}`)
+    return
+  }
+  if (_hostedRuntime.errorCount > _hostedSessionConfig.retryLimit) {
+    _hostedRuntime.status = HOSTED_STATUS.ERROR
+    persistHostedRuntime()
+    updateHostedBadge()
+    appendHostedOutput(`[托管 Agent] 需要人工介入: 连续错误超过阈值${formatHostedSummary()}`)
+    return
+  }
   if (_hostedRuntime.stepCount >= _hostedSessionConfig.maxSteps) {
     _hostedRuntime.status = HOSTED_STATUS.IDLE
     persistHostedRuntime()
@@ -2591,6 +2607,8 @@ async function runHostedAgentStep() {
   _hostedRuntime.pending = true
   _hostedRuntime.status = HOSTED_STATUS.RUNNING
   _hostedRuntime.lastRunAt = Date.now()
+  _hostedRuntime.lastRunId = uuid()
+  _currentRunId = _hostedRuntime.lastRunId
   persistHostedRuntime()
   updateHostedBadge()
 
@@ -2605,18 +2623,18 @@ async function runHostedAgentStep() {
     await callHostedAI(messages, (chunk) => {
       resultText += chunk
     })
-    const nextInstruction = resultText.trim()
-    if (!nextInstruction) throw new Error('托管 Agent 未生成指令')
+    const parsed = parseHostedTemplate(resultText)
+    if (!parsed) throw new Error('托管 Agent 输出未符合模板')
 
     _hostedRuntime.stepCount += 1
     _hostedRuntime.errorCount = 0
     _hostedRuntime.lastError = ''
 
-    _hostedSessionConfig.history.push({ role: 'assistant', content: nextInstruction, ts: Date.now() })
+    const rendered = renderHostedTemplate(parsed)
+    _hostedSessionConfig.history.push({ role: 'assistant', content: rendered, ts: Date.now() })
     persistHostedRuntime()
 
-    appendHostedOutput(`[托管 Agent] 下一步指令: ${nextInstruction}`)
-    await wsClient.chatSend(_sessionKey, nextInstruction)
+    appendHostedOutput(`${rendered}${formatHostedSummary()}`)
 
     _hostedRuntime.status = HOSTED_STATUS.WAITING
     _hostedRuntime.pending = false
@@ -2636,6 +2654,7 @@ async function runHostedAgentStep() {
       _hostedRuntime.status = HOSTED_STATUS.ERROR
       updateHostedBadge()
       persistHostedRuntime()
+      appendHostedOutput(`[托管 Agent] 需要人工介入: 连续错误超过阈值${formatHostedSummary()}`)
       return
     }
     persistHostedRuntime()
@@ -2877,8 +2896,48 @@ async function callGeminiHosted(base, systemPrompt, messages, config, onChunk, s
   }, signal)
 }
 
+function formatHostedSummary(extra) {
+  const parts = []
+  if (_currentRunId) parts.push(`runId=${_currentRunId}`)
+  if (_hostedRuntime.stepCount != null) parts.push(`step=${_hostedRuntime.stepCount}`)
+  if (_hostedRuntime.lastError) parts.push(`error=${_hostedRuntime.lastError}`)
+  if (extra) parts.push(extra)
+  return parts.length ? ` | ${parts.join(' | ')}` : ''
+}
+
+function parseHostedTemplate(text) {
+  const raw = (text || '').trim()
+  if (!raw) return null
+  const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  const goals = []
+  const suggestions = []
+  const risks = []
+  let section = ''
+  for (const line of lines) {
+    if (/^目标[:：]/i.test(line)) { section = 'goal'; const v = line.replace(/^目标[:：]\s*/i, ''); if (v) goals.push(v); continue }
+    if (/^建议[:：]/i.test(line)) { section = 'suggest'; const v = line.replace(/^建议[:：]\s*/i, ''); if (v) suggestions.push(v); continue }
+    if (/^风险[:：]/i.test(line)) { section = 'risk'; const v = line.replace(/^风险[:：]\s*/i, ''); if (v) risks.push(v); continue }
+    if (section === 'goal') goals.push(line)
+    else if (section === 'suggest') suggestions.push(line.replace(/^[\-*\d\.\s]+/, ''))
+    else if (section === 'risk') risks.push(line.replace(/^[\-*\d\.\s]+/, ''))
+  }
+  if (!goals.length || !suggestions.length) return null
+  return {
+    goal: goals.join(' '),
+    suggestions: suggestions.filter(Boolean),
+    risks: risks.filter(Boolean),
+  }
+}
+
+function renderHostedTemplate(parsed) {
+  const riskText = parsed.risks.length ? parsed.risks.map(r => `- ${r}`).join('\n') : '- 暂无'
+  const suggestText = parsed.suggestions.map(s => `- ${s}`).join('\n')
+  return `[托管 Agent] 目标: ${parsed.goal}\n建议:\n${suggestText}\n风险:\n${riskText}`
+}
+
 function appendHostedOutput(text) {
   if (!text) return
+  if (!text.startsWith('[托管 Agent]')) text = `[托管 Agent] ${text}`
   const wrap = document.createElement('div')
   wrap.className = 'msg msg-system msg-hosted'
   wrap.textContent = text
