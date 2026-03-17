@@ -103,7 +103,7 @@ let _sendBtn = null, _statusDot = null, _typingEl = null, _scrollBtn = null
 let _sessionListEl = null, _cmdPanelEl = null, _attachPreviewEl = null, _fileInputEl = null
 let _modelSelectEl = null
 let _hostedBtn = null, _hostedPanelEl = null, _hostedBadgeEl = null
-let _hostedPromptEl = null, _hostedEnableEl = null, _hostedMaxStepsEl = null, _hostedStepDelayEl = null, _hostedRetryLimitEl = null, _hostedContextLimitEl = null
+let _hostedPromptEl = null, _hostedEnableEl = null, _hostedMaxStepsEl = null, _hostedContextLimitEl = null
 let _hostedSaveBtn = null, _hostedPauseBtn = null, _hostedStopBtn = null, _hostedCloseBtn = null
 let _hostedGlobalSyncEl = null
 let _hostedDefaults = null
@@ -252,14 +252,6 @@ export async function render() {
                 <input class="form-input" id="hosted-agent-max-steps" type="number" min="1" max="200" step="1">
               </div>
               <div class="form-group">
-                <label class="form-label">步间隔 (ms)</label>
-                <input class="form-input" id="hosted-agent-step-delay" type="number" min="200" max="10000" step="100">
-              </div>
-              <div class="form-group">
-                <label class="form-label">重试次数</label>
-                <input class="form-input" id="hosted-agent-retry" type="number" min="0" max="5" step="1">
-              </div>
-              <div class="form-group">
                 <label class="form-label">上下文上限 (tokens)</label>
                 <input class="form-input" id="hosted-agent-context-limit" type="number" min="1000" max="2000000" step="1000">
               </div>
@@ -313,8 +305,6 @@ export async function render() {
   _hostedPromptEl = page.querySelector('#hosted-agent-prompt')
   _hostedEnableEl = page.querySelector('#hosted-agent-enabled')
   _hostedMaxStepsEl = page.querySelector('#hosted-agent-max-steps')
-  _hostedStepDelayEl = page.querySelector('#hosted-agent-step-delay')
-  _hostedRetryLimitEl = page.querySelector('#hosted-agent-retry')
   _hostedContextLimitEl = page.querySelector('#hosted-agent-context-limit')
   _hostedSaveBtn = page.querySelector('#hosted-agent-save')
   _hostedPauseBtn = page.querySelector('#hosted-agent-pause')
@@ -2515,8 +2505,6 @@ function renderHostedPanel() {
   if (_hostedPromptEl) _hostedPromptEl.value = _hostedSessionConfig.prompt || ''
   if (_hostedEnableEl) _hostedEnableEl.checked = !!_hostedSessionConfig.enabled
   if (_hostedMaxStepsEl) _hostedMaxStepsEl.value = _hostedSessionConfig.maxSteps || HOSTED_DEFAULTS.maxSteps
-  if (_hostedStepDelayEl) _hostedStepDelayEl.value = _hostedSessionConfig.stepDelayMs || HOSTED_DEFAULTS.stepDelayMs
-  if (_hostedRetryLimitEl) _hostedRetryLimitEl.value = _hostedSessionConfig.retryLimit ?? HOSTED_DEFAULTS.retryLimit
   if (_hostedContextLimitEl) _hostedContextLimitEl.value = _hostedSessionConfig.contextTokenLimit || HOSTED_DEFAULTS.contextTokenLimit
   const statusEl = _hostedPanelEl.querySelector('#hosted-agent-status')
   if (statusEl) {
@@ -2534,9 +2522,9 @@ async function saveHostedConfig() {
   const prompt = (_hostedPromptEl?.value || '').trim()
   const enabled = !!_hostedEnableEl?.checked
   const maxSteps = Math.max(1, parseInt(_hostedMaxStepsEl?.value || HOSTED_DEFAULTS.maxSteps, 10))
-  const stepDelayMs = Math.max(200, parseInt(_hostedStepDelayEl?.value || HOSTED_DEFAULTS.stepDelayMs, 10))
-  const retryLimit = Math.max(0, parseInt(_hostedRetryLimitEl?.value || HOSTED_DEFAULTS.retryLimit, 10))
   const contextTokenLimit = Math.max(1000, parseInt(_hostedContextLimitEl?.value || HOSTED_DEFAULTS.contextTokenLimit, 10))
+  const stepDelayMs = _hostedSessionConfig.stepDelayMs ?? HOSTED_DEFAULTS.stepDelayMs
+  const retryLimit = _hostedSessionConfig.retryLimit ?? HOSTED_DEFAULTS.retryLimit
 
   if (!prompt && enabled) { toast('请输入初始提示词', 'warning'); return }
 
@@ -3111,8 +3099,6 @@ export function cleanup() {
   _hostedPromptEl = null
   _hostedEnableEl = null
   _hostedMaxStepsEl = null
-  _hostedStepDelayEl = null
-  _hostedRetryLimitEl = null
   _hostedContextLimitEl = null
   _hostedSaveBtn = null
   _hostedPauseBtn = null
