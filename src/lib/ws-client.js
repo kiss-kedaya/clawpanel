@@ -29,6 +29,7 @@ const WS_STATE = {
   CONNECTING: 'connecting',
   CONNECTED: 'connected',
   READY: 'ready',
+  HANDSHAKING: 'handshaking',
   RECONNECTING: 'reconnecting',
   ERROR: 'error',
   AUTH_FAILED: 'auth_failed',
@@ -103,7 +104,7 @@ export class WsClient {
     this._clearChallengeTimer()
     this._flushPending()
     this._closeWs()
-    this._setConnected(false)
+    this._setConnected(false, WS_STATE.DISCONNECTED)
     this._gatewayReady = false
     this._handshaking = false
   }
@@ -118,6 +119,7 @@ export class WsClient {
     this._clearChallengeTimer()
     this._flushPending()
     this._closeWs()
+    this._setConnected(false, WS_STATE.CONNECTING)
     this._doConnect()
   }
 
@@ -283,6 +285,7 @@ export class WsClient {
 
   async _sendConnectFrame(nonce) {
     this._handshaking = true
+    this._setConnected(false, WS_STATE.HANDSHAKING)
     try {
       const frame = await api.createConnectFrame(nonce, this._token)
       if (this._ws && this._ws.readyState === WebSocket.OPEN) {
@@ -292,6 +295,7 @@ export class WsClient {
     } catch (e) {
       console.error('[ws] 生成 connect frame 失败:', e)
       this._handshaking = false
+      this._setConnected(false, WS_STATE.ERROR, '生成握手失败')
     }
   }
 
