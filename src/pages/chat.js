@@ -2005,15 +2005,19 @@ function isAtBottom() {
 
 function ensureVirtualSpacers() {
   if (!_messagesEl) return
-  if (!_virtualTopSpacer) {
+  if (!_virtualTopSpacer || _virtualTopSpacer.parentNode !== _messagesEl) {
     _virtualTopSpacer = document.createElement('div')
     _virtualTopSpacer.className = 'msg-virtual-spacer'
     _messagesEl.insertBefore(_virtualTopSpacer, _messagesEl.firstChild)
   }
-  if (!_virtualBottomSpacer) {
+  if (!_virtualBottomSpacer || _virtualBottomSpacer.parentNode !== _messagesEl) {
     _virtualBottomSpacer = document.createElement('div')
     _virtualBottomSpacer.className = 'msg-virtual-spacer'
-    _messagesEl.insertBefore(_virtualBottomSpacer, _typingEl)
+    if (_typingEl && _typingEl.parentNode === _messagesEl) {
+      _messagesEl.insertBefore(_virtualBottomSpacer, _typingEl)
+    } else {
+      _messagesEl.appendChild(_virtualBottomSpacer)
+    }
   }
 }
 
@@ -2051,6 +2055,7 @@ function doVirtualRender() {
   for (let i = start; i < end; i++) {
     const item = items[i]
     if (!item?.node) continue
+    if (refNode && refNode.parentNode !== _messagesEl) refNode = _virtualBottomSpacer
     if (item.node.parentNode !== _messagesEl) {
       _messagesEl.insertBefore(item.node, refNode || _virtualBottomSpacer)
     }
