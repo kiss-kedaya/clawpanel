@@ -28,6 +28,7 @@ const CRON_SHORTCUTS = [
 ]
 
 const LOCAL_CRON_KEY = 'localCronJobs'
+const LOCAL_CRON_MIGRATED_KEY = 'localCronMigrated'
 const SESSION_IDLE_MS = 5000
 const SCHEDULER_INTERVAL_MS = 10000
 
@@ -78,11 +79,13 @@ export async function render() {
   if (_unsub) _unsub()
   _unsub = onGatewayChange(() => {
     updateGatewayHint(page)
+    migrateGatewayJobsIfNeeded().catch(() => {})
     fetchJobs(page, state)
     restartScheduler(page, state)
   })
 
   updateGatewayHint(page)
+  await migrateGatewayJobsIfNeeded()
   await fetchJobs(page, state)
   attachSessionActivityListener()
   restartScheduler(page, state)
@@ -103,6 +106,44 @@ function updateGatewayHint(page) {
   const el = page.querySelector('#cron-gw-hint')
   if (!el) return
   el.style.display = isGatewayUp() ? 'none' : ''
+}
+
+async function migrateGatewayJobsIfNeeded() {
+  const cfg = (await api.readPanelConfig()) || {}
+  if (cfg[LOCAL_CRON_MIGRATED_KEY]) return
+  if (!isGatewayUp()) return
+  try {
+    const res = await wsClient.request('cron.list', { includeDisabled: true })
+    let jobs = res?.jobs || res
+    if (!Array.isArray(jobs)) jobs = []
+    if (!jobs.length) {
+      cfg[LOCAL_CRON_MIGRATED_KEY] = true
+      await api.writePanelConfig(cfg)
+      return
+    }
+    const mapped = jobs.map(j => ({
+      id: j.id || uuid(),
+      name: j.name || j.id || '未命名',
+      enabled: j.enabled !== false,
+      schedule: j.schedule || { kind: 'cron', expr: '0 9 * * *' },
+      payload: {
+        kind: 'sessionMessage',
+        label: j.payload?.label || '',
+        message: j.payload?.message || j.payload?.text || '',
+        waitForIdle: true,
+      },
+      state: {
+        lastRunAtMs: j.state?.lastRunAtMs || 0,
+        lastStatus: j.state?.lastRunStatus || j.state?.lastStatus || null,
+        lastError: j.state?.lastError || null,
+      },
+    }))
+    cfg[LOCAL_CRON_KEY] = mapped
+    cfg[LOCAL_CRON_MIGRATED_KEY] = true
+    await api.writePanelConfig(cfg)
+  } catch (e) {
+    console.warn('[cron] migrateGatewayJobsIfNeeded failed', e)
+  }
 }
 
 // ── 数据加载（Gateway RPC） ──
@@ -505,15 +546,23 @@ async function tickScheduler(page, state) {
   const now = new Date()
   for (const job of jobs) {
     if (job.enabled === false) continue
-    const expr = extractCronExpr(job.schedule)
-    if (!expr) continue
-    if (!isCronDue(expr, now, job.state?.lastRunAtMs || 0)) continue
+    const kind = job.schedule?.kind || (extractCronExpr(job.schedule) ? 'cron' : 'cron')
+    if (kind === 'cron') {
+      const expr = extractCronExpr(job.schedule)
+      if (!expr) continue
+      if (!isCronDue(expr, now, job.state?.lastRunAtMs || 0)) continue
+    } else if (kind === 'every') {
+      if (!isEveryDue(job.schedule?.everyMs, now, job.state?.lastRunAtMs || 0)) continue
+    } else if (kind === 'at') {
+      if (!isAtDue(job.schedule?.at, now, job.state?.lastRunAtMs || 0, job.state?.completed)) continue
+    }
     await runLocalJob(job, false).catch(() => {})
   }
   await fetchJobs(page, state)
 }
 
 async function runLocalJob(job, manual) {
+  if (job.schedule?.kind === 'at' && job.state?.completed) return
   await refreshSessionLabelMap().catch(() => {})
   const sessionKey = _sessionLabelMap.get(job.payload?.label || '')
   if (!sessionKey) {
@@ -526,7 +575,7 @@ async function runLocalJob(job, manual) {
   }
   try {
     await wsClient.chatSend(sessionKey, job.payload?.message || '')
-    await updateLocalJob(job.id, { state: { ...job.state, lastStatus: 'ok', lastError: null, lastRunAtMs: Date.now() } })
+    await updateLocalJob(job.id, { state: { ...job.state, lastStatus: 'ok', lastError: null, lastRunAtMs: Date.now(), completed: job.schedule?.kind === 'at' } })
   } catch (e) {
     await updateLocalJob(job.id, { state: { ...job.state, lastStatus: 'error', lastError: String(e), lastRunAtMs: Date.now() } })
     throw e
@@ -546,6 +595,21 @@ function isCronDue(expr, now, lastRunAtMs) {
     && matchCronField(dom, now.getDate(), 1, 31)
     && matchCronField(mon, now.getMonth() + 1, 1, 12)
     && matchCronField(dow, now.getDay(), 0, 6)
+}
+
+function isEveryDue(everyMs, now, lastRunAtMs) {
+  if (!everyMs || Number.isNaN(Number(everyMs))) return false
+  if (!lastRunAtMs) return true
+  return (now.getTime() - lastRunAtMs) >= everyMs
+}
+
+function isAtDue(at, now, lastRunAtMs, completed) {
+  if (!at) return false
+  if (completed) return false
+  const target = new Date(at).getTime()
+  if (Number.isNaN(target)) return false
+  const last = lastRunAtMs || 0
+  return now.getTime() >= target && last < target
 }
 
 function matchCronField(field, value, min, max) {
@@ -590,6 +654,16 @@ function extractCronExpr(schedule) {
 
 /** 将 cron 表达式转为可读文字 */
 function describeCron(raw) {
+  if (raw?.kind === 'every' && raw.everyMs) {
+    const ms = raw.everyMs
+    if (ms < 60000) return `每 ${Math.round(ms / 1000)} 秒`
+    if (ms < 3600000) return `每 ${Math.round(ms / 60000)} 分钟`
+    return `每 ${Math.round(ms / 3600000)} 小时`
+  }
+  if (raw?.kind === 'at' && raw.at) {
+    try { return '一次性: ' + new Date(raw.at).toLocaleString() } catch { return raw.at }
+  }
+
   const expr = typeof raw === 'string' ? raw : extractCronExpr(raw)
   if (!expr) return '未知周期'
 
@@ -614,9 +688,7 @@ function describeCron(raw) {
 function describeCronFull(schedule) {
   if (!schedule) return '未知'
   if (typeof schedule === 'string') return describeCron(schedule)
-  if (typeof schedule === 'object') {
-    if (schedule.kind === 'cron' && schedule.expr) return describeCron(schedule.expr)
-  }
+  if (typeof schedule === 'object') return describeCron(schedule)
   return String(schedule)
 }
 
