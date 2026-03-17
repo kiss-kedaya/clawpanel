@@ -1272,6 +1272,17 @@ function handleChatEvent(payload) {
       appendFilesToEl(_currentAiBubble, _currentAiFiles)
       appendToolsToEl(_currentAiBubble, finalTools.length ? finalTools : _currentAiTools)
     }
+
+    if (runId) {
+      const ids = _toolRunIndex.get(runId) || []
+      ids.forEach(id => {
+        const key = `${runId}:${id}`
+        _toolEventTimes.delete(key)
+        _toolEventData.delete(key)
+        _toolEventSeen.delete(key)
+      })
+      _toolRunIndex.delete(runId)
+    }
     // 添加时间戳 + 耗时 + token 消耗
     const wrapper = _currentAiBubble?.parentElement
     if (wrapper) {
