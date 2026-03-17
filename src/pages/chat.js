@@ -2625,6 +2625,9 @@ async function callHostedAI(messages, onChunk) {
   if (_hostedAbort) { _hostedAbort.abort(); _hostedAbort = null }
   _hostedAbort = new AbortController()
   const signal = _hostedAbort.signal
+  const timeout = setTimeout(() => {
+    if (_hostedAbort) _hostedAbort.abort()
+  }, 120000)
 
   try {
     if (apiType === 'anthropic-messages') {
@@ -2637,6 +2640,7 @@ async function callHostedAI(messages, onChunk) {
     }
     await callChatCompletionsHosted(base, systemPrompt, chatMessages, config, onChunk, signal)
   } finally {
+    clearTimeout(timeout)
     _hostedAbort = null
   }
 }
@@ -2730,7 +2734,7 @@ async function readSSEStream(resp, onEvent, signal) {
   if (signal) signal.addEventListener('abort', onAbort)
   try {
     while (true) {
-      if (aborted) break
+      if (aborted) throw new Error('托管流式请求已中止')
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
