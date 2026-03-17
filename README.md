@@ -41,6 +41,16 @@ ClawPanel 是 [OpenClaw](https://github.com/1186258278/OpenClawChineseTranslatio
 
 > **官网**: [claw.qt.cool](https://claw.qt.cool/)  |  **下载**: [GitHub Releases](https://github.com/qingchencloud/clawpanel/releases/latest)
 
+### 近期亮点
+
+- **v0.9.x**：聊天体验重构，消息渲染与交互稳定性显著提升。
+- **聊天虚拟滚动**：大聊天记录场景性能优化，滚动更顺、渲染负载降低。
+- **Markdown-it**：引入稳定的 Markdown 渲染与扩展能力，展示一致性提升。
+- **v0.8.0**：多 Agent 渠道能力完善，任务分发与协作更清晰。
+- **Gateway 补丁**：连接与转发链路修复，长连接更可靠。
+- **R2 通用包**：分发与复用成本降低，部署更灵活。
+- **v0.6.0**：基础能力完善与稳定性打底，为后续迭代奠基。
+
 ### ⚡ OpenClaw 独立安装包（零依赖，无需 Node.js/npm）
 
 不想折腾 Node.js 环境？直接下载 [OpenClaw 独立安装包](https://github.com/qingchencloud/openclaw-standalone/releases/latest)，**内置运行时，解压即用**：
