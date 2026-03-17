@@ -76,6 +76,8 @@ let _virtualTopSpacer = null
 let _virtualBottomSpacer = null
 let _virtualRenderPending = false
 let _autoScrollEnabled = true
+let _lastScrollTop = 0
+let _touchStartY = 0
 let _streamSafetyTimer = null, _unsubEvent = null, _unsubReady = null, _unsubStatus = null
 let _seenRunIds = new Set()
 let _pageActive = false
@@ -282,8 +284,20 @@ function bindEvents(page) {
   _messagesEl.addEventListener('scroll', () => {
     const { scrollTop, scrollHeight, clientHeight } = _messagesEl
     _scrollBtn.style.display = (scrollHeight - scrollTop - clientHeight < 80) ? 'none' : 'flex'
-    _autoScrollEnabled = isAtBottom()
+    if (scrollTop < _lastScrollTop - 2) _autoScrollEnabled = false
+    if (isAtBottom()) _autoScrollEnabled = true
+    _lastScrollTop = scrollTop
   })
+  _messagesEl.addEventListener('wheel', (e) => {
+    if (e.deltaY < 0) _autoScrollEnabled = false
+  }, { passive: true })
+  _messagesEl.addEventListener('touchstart', (e) => {
+    _touchStartY = e.touches?.[0]?.clientY || 0
+  }, { passive: true })
+  _messagesEl.addEventListener('touchmove', (e) => {
+    const y = e.touches?.[0]?.clientY || 0
+    if (y > _touchStartY + 2) _autoScrollEnabled = false
+  }, { passive: true })
   _scrollBtn.addEventListener('click', () => {
     _autoScrollEnabled = true
     scrollToBottom(true)
@@ -1952,6 +1966,8 @@ function clearMessages() {
   _virtualHeights = new Map()
   _virtualAvgHeight = 64
   _virtualRange = { start: 0, end: 0, prefix: [0] }
+  _autoScrollEnabled = true
+  _lastScrollTop = 0
   if (_virtualTopSpacer) _virtualTopSpacer.style.height = '0px'
   if (_virtualBottomSpacer) _virtualBottomSpacer.style.height = '0px'
 }
