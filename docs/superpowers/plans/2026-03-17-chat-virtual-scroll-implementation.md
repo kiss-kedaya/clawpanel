@@ -79,9 +79,7 @@ export function computeVirtualRange(items, scrollTop, viewportHeight, avgHeight,
   const prefix = buildPrefixHeights(items, heights, avgHeight)
   const start = Math.max(0, findStartIndex(prefix, scrollTop) - overscan)
   let end = Math.min(items.length, start + windowSize + overscan * 2)
-  const maxY = scrollTop + viewportHeight + avgHeight * overscan
-  while (end < items.length && prefix[end] < maxY) end++
-  end = Math.min(items.length, end)
+  // 固定窗口：严格限制 end-start 不超过 windowSize + overscan*2
   return { start, end, prefix }
 }
 
