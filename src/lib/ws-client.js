@@ -139,7 +139,7 @@ export class WsClient {
       if (wsId !== this._wsId) return
       this._connecting = false
       this._reconnectAttempts = 0
-      this._setConnected(true)
+      this._setConnected(true, WS_STATE.CONNECTED)
       this._startPing()
       // 等 Gateway 发 connect.challenge，超时则主动发
       this._challengeTimer = setTimeout(() => {
@@ -179,7 +179,7 @@ export class WsClient {
         this._setConnected(false, WS_STATE.ERROR, e.reason || 'origin not allowed，请点击「修复并重连」')
         return
       }
-      this._setConnected(false)
+      this._setConnected(false, WS_STATE.DISCONNECTED)
       this._gatewayReady = false
       this._handshaking = false
       this._stopPing()
@@ -277,7 +277,7 @@ export class WsClient {
       }, 2000)
     } catch (e) {
       console.error('[ws] 自动配对失败:', e)
-      this._setConnected(false, 'error', `配对失败: ${e}`)
+      this._setConnected(false, WS_STATE.ERROR, `配对失败: ${e}`)
     } finally {
       this._autoPairing = false
     }
