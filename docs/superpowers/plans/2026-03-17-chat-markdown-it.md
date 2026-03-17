@@ -4,7 +4,7 @@
 
 **Goal:** Replace the chat Markdown renderer with markdown-it plus plugins to support underline, spoiler, and mention, matching GitHub-like behavior.
 
-**Architecture:** Use markdown-it with html disabled, link validation, custom renderer for code blocks using existing highlightCode. Add local plugins for spoiler (|| || + >! !<) and mention (@user), and use markdown-it-ins for underline rendering to <u>.
+**Architecture:** Use markdown-it with html disabled, link validation, custom renderer for code blocks using existing highlightCode. Add local plugins for spoiler (|| || + >! !<), mention (@user), and a custom underline rule that maps __text__ to <u>.
 
 **Tech Stack:** JS, Vite
 
@@ -28,7 +28,6 @@ git commit --allow-empty -m "chore: checkpoint before markdown-it"
 
 Add to dependencies:
 - markdown-it
-- markdown-it
 
 - [ ] **Step 2: Install**
 
@@ -51,7 +50,6 @@ git commit -m "chore: add markdown-it deps"
 - [ ] **Step 1: Instantiate markdown-it**
 
 ```js
-import MarkdownIt from 'markdown-it'
 import MarkdownIt from 'markdown-it'
 ```
 
