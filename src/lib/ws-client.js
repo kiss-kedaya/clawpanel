@@ -49,6 +49,7 @@ export class WsClient {
     this._autoPairAttempts = 0
     this._autoPairing = false
     this._serverVersion = null
+    this._state = 'disconnected'
   }
 
   get connected() { return this._connected }
@@ -58,6 +59,7 @@ export class WsClient {
   get hello() { return this._hello }
   get sessionKey() { return this._sessionKey }
   get serverVersion() { return this._serverVersion }
+  get state() { return this._state }
 
   onStatusChange(fn) {
     this._statusListeners.push(fn)
@@ -308,6 +310,7 @@ export class WsClient {
   _setConnected(val, status, errorMsg) {
     this._connected = val
     const s = status || (val ? 'connected' : 'disconnected')
+    this._state = s
     this._statusListeners.forEach(fn => {
       try { fn(s, errorMsg) } catch (e) { console.error('[ws] status listener error:', e) }
     })

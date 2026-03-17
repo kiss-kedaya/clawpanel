@@ -101,9 +101,19 @@ async function invoke(cmd, args = {}) {
 }
 
 // Web 模式：通过 Vite 开发服务器的 API 端点调用真实后端
+const COMMAND_TIMEOUTS = {
+  'get_status_summary': 30000,
+  'list_agents': 20000,
+  'read_log_tail': 15000,
+  'get_services_status': 15000,
+  'read_openclaw_config': 15000,
+  'list_backups': 15000,
+}
+
 async function webInvoke(cmd, args) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20000)
+  const timeoutMs = COMMAND_TIMEOUTS[cmd] || 20000
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
   let resp
   try {
     resp = await fetch(`/__api/${cmd}`, {
