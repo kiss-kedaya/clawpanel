@@ -406,6 +406,16 @@ export class WsClient {
           const id = uuid()
           this._ws.send(JSON.stringify({ type: 'req', id, method: 'node.list', params: {} }))
         } catch {}
+        try {
+          const sessionKey = this._sessionKey || `agent:main:main`
+          const id = uuid()
+          this._ws.send(JSON.stringify({
+            type: 'req',
+            id,
+            method: 'chat.history',
+            params: { sessionKey, limit: 50 },
+          }))
+        } catch {}
       }
     }, PING_INTERVAL)
   }
