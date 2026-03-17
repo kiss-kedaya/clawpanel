@@ -2071,9 +2071,7 @@ function doVirtualRender() {
     })
     if (count) _virtualAvgHeight = Math.max(24, Math.round(total / count))
 
-    if (atBottom && _autoScrollEnabled) {
-      scrollToBottom()
-    } else {
+    if (!atBottom || !_autoScrollEnabled) {
       const newTop = _virtualTopSpacer.offsetHeight
       const delta = newTop - top
       if (delta !== 0) _messagesEl.scrollTop = scrollTop + delta
