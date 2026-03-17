@@ -23,6 +23,7 @@ const REQUEST_TIMEOUT = 30000
 const MAX_RECONNECT_DELAY = 30000
 const PING_INTERVAL = 5000
 const CHALLENGE_TIMEOUT = 5000
+const WS_DEBUG = typeof window !== 'undefined' && localStorage.getItem('clawpanel-ws-debug') === '1'
 
 const WS_STATE = {
   DISCONNECTED: 'disconnected',
@@ -322,8 +323,12 @@ export class WsClient {
   }
 
   _transition(status, errorMsg) {
+    const prev = this._state
     this._state = status
     this._connected = status === WS_STATE.CONNECTED || status === WS_STATE.READY
+    if (WS_DEBUG && prev !== status) {
+      console.log('[ws] state', prev, '->', status, errorMsg || '')
+    }
     this._statusListeners.forEach(fn => {
       try { fn(status, errorMsg) } catch (e) { console.error('[ws] status listener error:', e) }
     })
