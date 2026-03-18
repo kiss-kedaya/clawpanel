@@ -55,6 +55,64 @@ const GIT_HTTPS_REWRITES = [
   'git://github.com/',
   'git+ssh://git@github.com/'
 ]
+const CLAWPANEL_DIR = path.resolve(__dev_dirname, '..')
+const SAFE_ROOTS = [OPENCLAW_DIR, CLAWPANEL_DIR]
+
+function isPrivateHost(hostname) {
+  const h = String(hostname || '').toLowerCase()
+  if (!h) return true
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true
+  if (/^0\.0\.0\.0$/.test(h)) return true
+  if (/^10\./.test(h)) return true
+  if (/^192\.168\./.test(h)) return true
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(h)) return true
+  if (/^169\.254\./.test(h)) return true
+  if (/^fc00:|^fd00:|^fe80:/.test(h)) return true
+  return false
+}
+
+function validateEndpoint(endpoint) {
+  let u
+  try { u = new URL(endpoint) } catch { throw new Error('endpoint 非法') }
+  if (!['http:', 'https:'].includes(u.protocol)) throw new Error('endpoint 协议非法')
+  if (u.username || u.password) throw new Error('endpoint 禁止包含认证信息')
+  if (isPrivateHost(u.hostname)) throw new Error('endpoint 禁止指向内网/本机')
+  return true
+}
+
+function validateRemoteUrl(raw) {
+  let u
+  try { u = new URL(raw) } catch { throw new Error('URL 非法') }
+  if (!['http:', 'https:'].includes(u.protocol)) throw new Error('URL 协议非法')
+  if (u.username || u.password) throw new Error('URL 禁止包含认证信息')
+  if (isPrivateHost(u.hostname)) throw new Error('URL 禁止指向内网/本机')
+  return true
+}
+
+function resolveSafePath(inputPath) {
+  const expanded = String(inputPath || '').startsWith('~/')
+    ? path.join(homedir(), String(inputPath).slice(2))
+    : String(inputPath || '')
+  const resolved = path.resolve(expanded)
+  const allowed = SAFE_ROOTS.some(root => resolved === root || resolved.startsWith(root + path.sep))
+  if (!allowed) throw new Error('路径超出允许范围')
+  return resolved
+}
+
+const EXEC_WHITELIST = new Set(['openclaw', 'npm', 'node', 'git', 'pnpm', 'yarn', 'npx', 'wails', 'uv'])
+function parseCommandName(command) {
+  const token = String(command || '').trim().split(/\s+/)[0] || ''
+  const cleaned = token.replace(/^"|"$/g, '')
+  const base = path.basename(cleaned)
+  return base.replace(/\.(exe|cmd|bat)$/i, '').toLowerCase()
+}
+function assertSafeCommand(command, cwd) {
+  if (!command) throw new Error('命令不能为空')
+  if (/[&|><^;]/.test(command) || /\r|\n/.test(command)) throw new Error('命令包含非法字符')
+  const name = parseCommandName(command)
+  if (!EXEC_WHITELIST.has(name)) throw new Error('命令不在白名单')
+  if (cwd) resolveSafePath(cwd)
+}
 
 // === 异步任务存储 ===
 const _taskStore = new Map()   // taskId → task object
@@ -1455,6 +1513,8 @@ function getActiveInstance() {
 }
 
 async function proxyToInstance(instance, cmd, body) {
+  if (!instance?.endpoint) throw new Error('endpoint 不能为空')
+  validateEndpoint(instance.endpoint)
   const url = `${instance.endpoint}/__api/${cmd}`
   const resp = await fetch(url, {
     method: 'POST',
@@ -1498,6 +1558,7 @@ async function instanceHealthCheck(instance) {
 
   if (!instance.endpoint) return result
   try {
+    validateEndpoint(instance.endpoint)
     const resp = await fetch(`${instance.endpoint}/__api/check_installation`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1512,6 +1573,7 @@ async function instanceHealthCheck(instance) {
   } catch {}
   if (result.online) {
     try {
+      validateEndpoint(instance.endpoint)
       const resp = await fetch(`${instance.endpoint}/__api/get_services_status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1950,6 +2012,7 @@ const handlers = {
   instance_add({ name, type, endpoint, gatewayPort, containerId, nodeId, note }) {
     if (!name) throw new Error('实例名称不能为空')
     if (!endpoint) throw new Error('端点地址不能为空')
+    validateEndpoint(endpoint)
     const data = readInstances()
     const id = type === 'docker' ? `docker-${(containerId || Date.now().toString(36)).slice(0, 12)}` : `remote-${Date.now().toString(36)}`
     if (data.instances.find(i => i.endpoint === endpoint)) throw new Error('该端点已存在')
@@ -3758,12 +3821,9 @@ const handlers = {
   // === AI 助手工具（Web 模式真实执行） ===
 
   assistant_exec({ command, cwd }) {
-    if (!command) throw new Error('命令不能为空')
-    // 安全限制：禁止危险命令
-    const dangerous = ['rm -rf /', 'mkfs', 'dd if=', ':(){', 'format ', 'del /f /s /q C:']
-    if (dangerous.some(d => command.includes(d))) throw new Error('危险命令已被拦截')
+    assertSafeCommand(command, cwd)
     const opts = { timeout: 30000, maxBuffer: 1024 * 1024, windowsHide: true }
-    if (cwd) opts.cwd = cwd
+    if (cwd) opts.cwd = resolveSafePath(cwd)
     try {
       const output = execSync(command, opts).toString()
       return output || '（命令已执行，无输出）'
@@ -3776,7 +3836,7 @@ const handlers = {
 
   assistant_read_file({ path: filePath }) {
     if (!filePath) throw new Error('路径不能为空')
-    const expanded = filePath.startsWith('~/') ? path.join(homedir(), filePath.slice(2)) : filePath
+    const expanded = resolveSafePath(filePath)
     if (!fs.existsSync(expanded)) throw new Error(`文件不存在: ${filePath}`)
     const stat = fs.statSync(expanded)
     if (stat.size > 1024 * 1024) throw new Error(`文件过大 (${(stat.size / 1024 / 1024).toFixed(1)}MB)，最大 1MB`)
@@ -3785,7 +3845,7 @@ const handlers = {
 
   assistant_write_file({ path: filePath, content }) {
     if (!filePath) throw new Error('路径不能为空')
-    const expanded = filePath.startsWith('~/') ? path.join(homedir(), filePath.slice(2)) : filePath
+    const expanded = resolveSafePath(filePath)
     const dir = path.dirname(expanded)
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(expanded, content || '')
@@ -3794,7 +3854,7 @@ const handlers = {
 
   assistant_list_dir({ path: dirPath }) {
     if (!dirPath) throw new Error('路径不能为空')
-    const expanded = dirPath.startsWith('~/') ? path.join(homedir(), dirPath.slice(2)) : dirPath
+    const expanded = resolveSafePath(dirPath)
     if (!fs.existsSync(expanded)) throw new Error(`目录不存在: ${dirPath}`)
     const entries = fs.readdirSync(expanded, { withFileTypes: true })
     return entries.map(e => {
@@ -3939,7 +3999,7 @@ const handlers = {
 
   async assistant_fetch_url({ url }) {
     if (!url) throw new Error('URL 不能为空')
-    if (!url.startsWith('http://') && !url.startsWith('https://')) throw new Error('URL 必须以 http:// 或 https:// 开头')
+    validateRemoteUrl(url)
 
     try {
       // 优先使用 Jina Reader API（免费，返回 Markdown）
