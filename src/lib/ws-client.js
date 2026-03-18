@@ -424,7 +424,7 @@ export class WsClient {
         try {
           const sessionKey = this._sessionKey || `agent:main:main`
           const id = uuid()
-          this.request('chat.history', { sessionKey, limit: 50 }, { emitEvent: true }).catch(() => {})
+          this.request('chat.history', { sessionKey, limit: 200 }, { emitEvent: true }).catch(() => {})
         } catch {}
       }
     }, PING_INTERVAL)

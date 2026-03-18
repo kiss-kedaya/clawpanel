@@ -174,6 +174,8 @@ let _currentAiBubble = null, _currentAiText = '', _currentAiImages = [], _curren
 let _isStreaming = false, _isSending = false, _messageQueue = [], _streamStartTime = 0
 let _lastRenderTime = 0, _renderPending = false, _lastHistoryHash = ''
 let _isLoadingHistory = false
+let _pendingHistoryPayload = null
+let _pendingHistoryTs = 0
 
 const VIRTUAL_WINDOW = 40
 const VIRTUAL_OVERSCAN = 20
@@ -1229,6 +1231,16 @@ function handleEvent(msg) {
   if (event === 'chat.history') {
     const reqKey = payload?._req?.sessionKey || ''
     if (reqKey && _sessionKey && reqKey !== _sessionKey) return
+    if (!_messagesEl) {
+      _pendingHistoryPayload = payload
+      _pendingHistoryTs = Date.now()
+      return
+    }
+    if (_isSending || _isStreaming || _messageQueue.length > 0) {
+      _pendingHistoryPayload = payload
+      _pendingHistoryTs = Date.now()
+      return
+    }
     const hasExisting = _messagesEl?.querySelector?.('.msg')
     applyHistoryResult(payload, hasExisting)
   }
@@ -1701,9 +1713,41 @@ function resetStreamState() {
   _errorTimer = null
   showTyping(false)
   updateSendState()
+  flushPendingHistory()
 }
 
 // ── 历史消息加载 ──
+
+function buildHistoryHash(messages) {
+  if (!messages || !messages.length) return ''
+  return messages.map(m => {
+    const role = m.role || ''
+    const id = m.id || m.messageId || m.msgId || m.runId || ''
+    const ts = m.timestamp || m.time || m.ts || ''
+    let size = 0
+    if (typeof m.content === 'string') {
+      size = m.content.length
+    } else if (Array.isArray(m.content)) {
+      m.content.forEach(block => {
+        if (block?.type === 'text' && typeof block.text === 'string') size += block.text.length
+        else if (block) size += 1
+      })
+    } else if (typeof m.text === 'string') {
+      size = m.text.length
+    }
+    return `${role}:${id}:${ts}:${size}`
+  }).join('|')
+}
+
+function flushPendingHistory() {
+  if (!_pendingHistoryPayload || !_messagesEl) return
+  if (_isSending || _isStreaming || _messageQueue.length > 0) return
+  const payload = _pendingHistoryPayload
+  _pendingHistoryPayload = null
+  _pendingHistoryTs = 0
+  const hasExisting = _messagesEl?.querySelector?.('.msg')
+  applyHistoryResult(payload, hasExisting)
+}
 
 function applyHistoryResult(result, hasExisting) {
   if (!result?.messages?.length) {
@@ -1711,7 +1755,7 @@ function applyHistoryResult(result, hasExisting) {
     return
   }
   const deduped = dedupeHistory(result.messages)
-  const hash = deduped.map(m => `${m.role}:${(m.text || '').length}`).join('|')
+  const hash = buildHistoryHash(result.messages)
   if (hash === _lastHistoryHash && hasExisting) return
   _lastHistoryHash = hash
 
@@ -1801,13 +1845,14 @@ async function loadHistory() {
   }
   if (!wsClient.gatewayReady) { _isLoadingHistory = false; return }
   try {
-    const result = await wsClient.chatHistory(_sessionKey, 50)
+    const result = await wsClient.chatHistory(_sessionKey, 200)
     applyHistoryResult(result, hasExisting)
   } catch (e) {
     console.error('[chat] loadHistory error:', e)
     if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('加载历史失败: ' + e.message)
   } finally {
     _isLoadingHistory = false
+    flushPendingHistory()
   }
 }
 
@@ -3347,4 +3392,6 @@ export function cleanup() {
   _toolEventData.clear()
   _toolRunIndex.clear()
   _toolEventSeen.clear()
+  _pendingHistoryPayload = null
+  _pendingHistoryTs = 0
 }
