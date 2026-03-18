@@ -178,10 +178,8 @@ let _askUserBlockedNotice = false
 const _askUserToolHandled = new Set()
 let _currentAiBubble = null, _currentAiText = '', _currentAiImages = [], _currentAiVideos = [], _currentAiAudios = [], _currentAiFiles = [], _currentAiTools = [], _currentRunId = null
 let _isStreaming = false, _isSending = false, _messageQueue = [], _streamStartTime = 0
-let _lastRenderTime = 0, _renderPending = false, _lastHistoryHash = ''
+let _lastRenderTime = 0, _renderPending = false
 let _isLoadingHistory = false
-let _pendingHistoryPayload = null
-let _pendingHistoryTs = 0
 
 const VIRTUAL_WINDOW = 40
 const VIRTUAL_OVERSCAN = 20
@@ -199,14 +197,33 @@ let _virtualObserver = null
 let _autoScrollEnabled = true, _lastScrollTop = 0, _touchStartY = 0
 
 let _streamSafetyTimer = null, _unsubEvent = null, _unsubReady = null, _unsubStatus = null
-let _seenRunIds = new Set()
 let _pageActive = false
-const _toolEventTimes = new Map()
-const _toolEventData = new Map()
-const _toolRunIndex = new Map()
-const _toolEventSeen = new Set()
+const _sessionStates = new Map()
 let _errorTimer = null, _lastErrorMsg = null
 let _attachments = []
+
+function _normalizeSessionKey(key) {
+  if (typeof key === 'string' && key.trim()) return key.trim()
+  if (_sessionKey) return _sessionKey
+  return 'default'
+}
+
+function getSessionState(sessionKey) {
+  const key = _normalizeSessionKey(sessionKey)
+  if (!_sessionStates.has(key)) {
+    _sessionStates.set(key, {
+      lastHistoryHash: '',
+      pendingHistoryPayload: null,
+      pendingHistoryTs: 0,
+      seenRunIds: new Set(),
+      toolEventTimes: new Map(),
+      toolEventData: new Map(),
+      toolRunIndex: new Map(),
+      toolEventSeen: new Set(),
+    })
+  }
+  return _sessionStates.get(key)
+}
 let _hasEverConnected = false
 let _availableModels = []
 let _primaryModel = ''
@@ -964,7 +981,8 @@ function switchSession(newKey) {
   _sessionKey = newKey
   localStorage.setItem(STORAGE_SESSION_KEY, newKey)
   wsClient.setSessionKey(newKey)
-  _lastHistoryHash = ''
+  const state = getSessionState(_sessionKey)
+  state.lastHistoryHash = ''
   resetStreamState()
   updateSessionTitle()
   clearMessages()
@@ -1051,7 +1069,8 @@ async function resetCurrentSession() {
   try {
     await wsClient.sessionsReset(_sessionKey)
     clearMessages()
-    _lastHistoryHash = ''
+    const state = getSessionState(_sessionKey)
+    state.lastHistoryHash = ''
     appendSystemMessage('会话已重置')
     toast('会话已重置', 'success')
   } catch (e) {
@@ -1213,25 +1232,27 @@ function stopGeneration() {
 function handleEvent(msg) {
   const { event, payload } = msg
   if (!payload) return
+  const sessionKey = _normalizeSessionKey(payload?.sessionKey || payload?._req?.sessionKey)
+  const state = getSessionState(sessionKey)
 
   if (event === 'agent' && payload?.stream === 'tool' && payload?.data?.toolCallId) {
     const ts = payload.ts
     const toolCallId = payload.data.toolCallId
     const runId = payload.runId || ''
     const runKey = runId ? `${runId}:${toolCallId}` : toolCallId
-    if (_toolEventSeen.has(runKey)) return
-    _toolEventSeen.add(runKey)
-    if (ts) _toolEventTimes.set(runKey, ts)
-    const current = _toolEventData.get(runKey) || {}
+    if (state.toolEventSeen.has(runKey)) return
+    state.toolEventSeen.add(runKey)
+    if (ts) state.toolEventTimes.set(runKey, ts)
+    const current = state.toolEventData.get(runKey) || {}
     if (payload.data?.args && current.input == null) current.input = payload.data.args
     if (payload.data?.meta && current.output == null) current.output = payload.data.meta
     if (typeof payload.data?.isError === 'boolean' && current.status == null) current.status = payload.data.isError ? 'error' : 'ok'
     if (current.time == null) current.time = ts || null
-    _toolEventData.set(runKey, current)
+    state.toolEventData.set(runKey, current)
     if (runId) {
-      const list = _toolRunIndex.get(runId) || []
+      const list = state.toolRunIndex.get(runId) || []
       if (!list.includes(toolCallId)) list.push(toolCallId)
-      _toolRunIndex.set(runId, list)
+      state.toolRunIndex.set(runId, list)
     }
   }
 
@@ -1239,17 +1260,17 @@ function handleEvent(msg) {
     const reqKey = payload?._req?.sessionKey || ''
     if (reqKey && _sessionKey && reqKey !== _sessionKey) return
     if (!_messagesEl) {
-      _pendingHistoryPayload = payload
-      _pendingHistoryTs = Date.now()
+      state.pendingHistoryPayload = payload
+      state.pendingHistoryTs = Date.now()
       return
     }
     if (_isSending || _isStreaming || _messageQueue.length > 0) {
-      _pendingHistoryPayload = payload
-      _pendingHistoryTs = Date.now()
+      state.pendingHistoryPayload = payload
+      state.pendingHistoryTs = Date.now()
       return
     }
     const hasExisting = _messagesEl?.querySelector?.('.msg')
-    applyHistoryResult(payload, hasExisting)
+    applyHistoryResult(payload, hasExisting, _sessionKey)
   }
 
   if (event === 'chat') handleChatEvent(payload)
@@ -1281,12 +1302,14 @@ function handleChatEvent(payload) {
 
   const { state } = payload
   const runId = payload.runId
+  const sessionKey = _normalizeSessionKey(payload.sessionKey || _sessionKey)
+  const sessionState = getSessionState(sessionKey)
 
   const isUiSession = !payload.sessionKey || payload.sessionKey === _sessionKey
   if (!isUiSession) {
     if (state === 'final') {
       return withHostedState(payload.sessionKey, () => {
-        const c = extractChatContent(payload.message)
+        const c = extractChatContent(payload.message, sessionKey)
         const finalText = c?.text || ''
         if (finalText && shouldCaptureHostedTarget(payload)) {
           appendHostedTarget(finalText, payload.timestamp || Date.now())
@@ -1298,17 +1321,17 @@ function handleChatEvent(payload) {
   }
 
   // 重复 run 过滤：跳过已完成的 runId 的后续事件（Gateway 可能对同一消息触发多个 run）
-  if (runId && state === 'final' && _seenRunIds.has(runId)) {
+  if (runId && state === 'final' && sessionState.seenRunIds.has(runId)) {
     console.log('[chat] 跳过重复 final, runId:', runId)
     return
   }
-  if (runId && state === 'delta' && _seenRunIds.has(runId) && !_isStreaming) {
+  if (runId && state === 'delta' && sessionState.seenRunIds.has(runId) && !_isStreaming) {
     console.log('[chat] 跳过已完成 run 的 delta, runId:', runId)
     return
   }
 
   if (state === 'delta') {
-    const c = extractChatContent(payload.message)
+    const c = extractChatContent(payload.message, sessionKey)
     if (c?.images?.length) _currentAiImages = c.images
     if (c?.videos?.length) _currentAiVideos = c.videos
     if (c?.audios?.length) _currentAiAudios = c.audios
@@ -1343,7 +1366,7 @@ function handleChatEvent(payload) {
   }
 
   if (state === 'final') {
-    const c = extractChatContent(payload.message)
+    const c = extractChatContent(payload.message, sessionKey)
     const finalText = c?.text || ''
     const finalImages = c?.images || []
     const finalVideos = c?.videos || []
@@ -1351,8 +1374,8 @@ function handleChatEvent(payload) {
     const finalFiles = c?.files || []
     let finalTools = c?.tools || []
     if (!finalTools.length && runId) {
-      const ids = _toolRunIndex.get(runId) || []
-      finalTools = ids.map(id => mergeToolEventData({ id, name: '工具' })).filter(Boolean)
+      const ids = sessionState.toolRunIndex.get(runId) || []
+      finalTools = ids.map(id => mergeToolEventData({ id, name: '工具' }, sessionKey)).filter(Boolean)
     }
 
     // 托管 Agent：记录对面回复并触发下一步（绑定会话亦可）
@@ -1370,10 +1393,10 @@ function handleChatEvent(payload) {
     if (!_currentAiBubble && !hasContent) return
     // 标记 runId 为已处理，防止重复
     if (runId) {
-      _seenRunIds.add(runId)
-      if (_seenRunIds.size > 200) {
-        const first = _seenRunIds.values().next().value
-        _seenRunIds.delete(first)
+      sessionState.seenRunIds.add(runId)
+      if (sessionState.seenRunIds.size > 200) {
+        const first = sessionState.seenRunIds.values().next().value
+        sessionState.seenRunIds.delete(first)
       }
     }
     showTyping(false)
@@ -1388,18 +1411,18 @@ function handleChatEvent(payload) {
       appendVideosToEl(_currentAiBubble, _currentAiVideos)
       appendAudiosToEl(_currentAiBubble, _currentAiAudios)
       appendFilesToEl(_currentAiBubble, _currentAiFiles)
-      appendToolsToEl(_currentAiBubble, finalTools.length ? finalTools : _currentAiTools)
+      appendToolsToEl(_currentAiBubble, finalTools.length ? finalTools : _currentAiTools, sessionKey)
     }
 
     if (runId) {
-      const ids = _toolRunIndex.get(runId) || []
+      const ids = sessionState.toolRunIndex.get(runId) || []
       ids.forEach(id => {
         const key = `${runId}:${id}`
-        _toolEventTimes.delete(key)
-        _toolEventData.delete(key)
-        _toolEventSeen.delete(key)
+        sessionState.toolEventTimes.delete(key)
+        sessionState.toolEventData.delete(key)
+        sessionState.toolEventSeen.delete(key)
       })
-      _toolRunIndex.delete(runId)
+      sessionState.toolRunIndex.delete(runId)
     }
     // 添加时间戳 + 耗时 + token 消耗
     const wrapper = _currentAiBubble?.parentElement
@@ -1492,10 +1515,10 @@ function handleChatEvent(payload) {
 }
 
 /** 从 Gateway message 对象提取文本和所有媒体（参照 clawapp extractContent） */
-function extractChatContent(message) {
+function extractChatContent(message, sessionKey) {
   if (!message || typeof message !== 'object') return null
   const tools = []
-  collectToolsFromMessage(message, tools)
+  collectToolsFromMessage(message, tools, sessionKey)
   if (message.role === 'tool' || message.role === 'toolResult') {
     const output = typeof message.content === 'string' ? message.content : null
     if (!tools.length) {
@@ -1541,10 +1564,10 @@ function extractChatContent(message) {
           input: block.input || block.args || block.parameters || block.arguments || block.tool_input || block.toolInput || block.tool?.input || block.tool?.args || block.meta?.input || block.meta?.args || null,
           output: null,
           status: block.status || 'ok',
-          time: resolveToolTime(callId, message.timestamp, message.runId),
+          time: resolveToolTime(callId, message.timestamp, message.runId, sessionKey),
           runId: message.runId,
           messageTimestamp: message.timestamp,
-        })
+        }, sessionKey)
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
         const resId = block.id || block.tool_call_id || block.toolCallId || block.result_id || block.resultId
@@ -1554,10 +1577,10 @@ function extractChatContent(message) {
           input: block.input || block.args || block.tool_input || block.toolInput || block.tool?.input || block.tool?.args || block.meta?.input || block.meta?.args || null,
           output: block.output || block.result || block.content || block.tool_output || block.output_text || block.result_text || block.tool?.output || block.meta?.output || null,
           status: block.status || 'ok',
-          time: resolveToolTime(resId, message.timestamp, message.runId),
+          time: resolveToolTime(resId, message.timestamp, message.runId, sessionKey),
           runId: message.runId,
           messageTimestamp: message.timestamp,
-        })
+        }, sessionKey)
       }
     }
     if (tools.length) {
@@ -1620,11 +1643,12 @@ function normalizeTime(raw) {
   return raw
 }
 
-function resolveToolTime(toolId, messageTimestamp, runId) {
+function resolveToolTime(toolId, messageTimestamp, runId, sessionKey) {
+  const state = getSessionState(sessionKey)
   const key = runId ? `${runId}:${toolId}` : toolId
-  let eventTs = toolId ? _toolEventTimes.get(key) : null
+  let eventTs = toolId ? state.toolEventTimes.get(key) : null
   if (!eventTs && runId) {
-    for (const [k, v] of _toolEventTimes.entries()) {
+    for (const [k, v] of state.toolEventTimes.entries()) {
       if (k.endsWith(`:${toolId}`)) { eventTs = v; break }
     }
   }
@@ -1717,7 +1741,7 @@ function resetStreamState() {
     appendVideosToEl(_currentAiBubble, _currentAiVideos)
     appendAudiosToEl(_currentAiBubble, _currentAiAudios)
     appendFilesToEl(_currentAiBubble, _currentAiFiles)
-    appendToolsToEl(_currentAiBubble, _currentAiTools)
+    appendToolsToEl(_currentAiBubble, _currentAiTools, _sessionKey)
   }
   _renderPending = false
   _lastRenderTime = 0
@@ -1762,24 +1786,26 @@ function buildHistoryHash(messages) {
 }
 
 function flushPendingHistory() {
-  if (!_pendingHistoryPayload || !_messagesEl) return
+  const state = getSessionState(_sessionKey)
+  if (!state.pendingHistoryPayload || !_messagesEl) return
   if (_isSending || _isStreaming || _messageQueue.length > 0) return
-  const payload = _pendingHistoryPayload
-  _pendingHistoryPayload = null
-  _pendingHistoryTs = 0
+  const payload = state.pendingHistoryPayload
+  state.pendingHistoryPayload = null
+  state.pendingHistoryTs = 0
   const hasExisting = _messagesEl?.querySelector?.('.msg')
-  applyHistoryResult(payload, hasExisting)
+  applyHistoryResult(payload, hasExisting, _sessionKey)
 }
 
-function applyHistoryResult(result, hasExisting) {
+function applyHistoryResult(result, hasExisting, sessionKey) {
   if (!result?.messages?.length) {
     if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('还没有消息，开始聊天吧')
     return
   }
-  const deduped = dedupeHistory(result.messages)
+  const deduped = dedupeHistory(result.messages, sessionKey)
   const hash = buildHistoryHash(result.messages)
-  if (hash === _lastHistoryHash && hasExisting) return
-  _lastHistoryHash = hash
+  const state = getSessionState(sessionKey)
+  if (hash === state.lastHistoryHash && hasExisting) return
+  state.lastHistoryHash = hash
 
   if (!_hostedSeeded && _hostedSessionConfig && (!_hostedSessionConfig.history || _hostedSessionConfig.history.length === 0)) {
     const seeded = deduped
@@ -1868,7 +1894,7 @@ async function loadHistory() {
   if (!wsClient.gatewayReady) { _isLoadingHistory = false; return }
   try {
     const result = await wsClient.chatHistory(_sessionKey, 200)
-    applyHistoryResult(result, hasExisting)
+    applyHistoryResult(result, hasExisting, _sessionKey)
   } catch (e) {
     console.error('[chat] loadHistory error:', e)
     if (_messagesEl && !_messagesEl.querySelector('.msg')) appendSystemMessage('加载历史失败: ' + e.message)
@@ -1878,15 +1904,15 @@ async function loadHistory() {
   }
 }
 
-function dedupeHistory(messages) {
+function dedupeHistory(messages, sessionKey) {
   const deduped = []
   for (const msg of messages) {
     const role = (msg.role === 'tool' || msg.role === 'toolResult') ? 'assistant' : msg.role
-    const c = extractContent(msg)
+    const c = extractContent(msg, sessionKey)
     if (!c.text && !c.images.length && !c.videos.length && !c.audios.length && !c.files.length && !c.tools.length) continue
     const tools = (c.tools || []).map(t => {
       const id = t.id || t.tool_call_id
-      const time = t.time || resolveToolTime(id, msg.timestamp, msg.runId)
+      const time = t.time || resolveToolTime(id, msg.timestamp, msg.runId, sessionKey)
       return { ...t, time, messageTimestamp: msg.timestamp, runId: msg.runId }
     })
     const last = deduped[deduped.length - 1]
@@ -1901,7 +1927,7 @@ function dedupeHistory(messages) {
         last.videos = [...(last.videos || []), ...c.videos]
         last.audios = [...(last.audios || []), ...c.audios]
         last.files = [...(last.files || []), ...c.files]
-        tools.forEach(t => upsertTool(last.tools, t))
+        tools.forEach(t => upsertTool(last.tools, t, sessionKey))
         continue
       }
     }
@@ -1910,9 +1936,9 @@ function dedupeHistory(messages) {
   return deduped
 }
 
-function extractContent(msg) {
+function extractContent(msg, sessionKey) {
   const tools = []
-  collectToolsFromMessage(msg, tools)
+  collectToolsFromMessage(msg, tools, sessionKey)
   if (msg.role === 'tool' || msg.role === 'toolResult') {
     const output = typeof msg.content === 'string' ? msg.content : null
     if (!tools.length) {
@@ -1922,10 +1948,10 @@ function extractContent(msg) {
         input: msg.input || msg.args || msg.parameters || null,
         output: output || msg.output || msg.result || null,
         status: msg.status || 'ok',
-        time: resolveToolTime(msg.tool_call_id || msg.toolCallId || msg.id, msg.timestamp, msg.runId),
+        time: resolveToolTime(msg.tool_call_id || msg.toolCallId || msg.id, msg.timestamp, msg.runId, sessionKey),
         runId: msg.runId,
         messageTimestamp: msg.timestamp,
-      })
+      }, sessionKey)
     } else if (output && !tools[0].output) {
       tools[0].output = output
     }
@@ -1960,8 +1986,8 @@ function extractContent(msg) {
           input: block.input || block.args || block.parameters || block.arguments || block.tool_input || block.toolInput || block.tool?.input || block.tool?.args || block.meta?.input || block.meta?.args || null,
           output: null,
           status: block.status || 'ok',
-          time: resolveToolTime(callId, msg.timestamp, msg.runId),
-        })
+          time: resolveToolTime(callId, msg.timestamp, msg.runId, sessionKey),
+        }, sessionKey)
       }
       else if (block.type === 'tool_result' || block.type === 'toolResult') {
         const resId = block.id || block.tool_call_id || block.toolCallId || block.result_id || block.resultId
@@ -1971,8 +1997,8 @@ function extractContent(msg) {
           input: block.input || block.args || block.tool_input || block.toolInput || block.tool?.input || block.tool?.args || block.meta?.input || block.meta?.args || null,
           output: block.output || block.result || block.content || block.tool_output || block.output_text || block.result_text || block.tool?.output || block.meta?.output || null,
           status: block.status || 'ok',
-          time: resolveToolTime(resId, msg.timestamp, msg.runId),
-        })
+          time: resolveToolTime(resId, msg.timestamp, msg.runId, sessionKey),
+        }, sessionKey)
       }
     }
     if (tools.length) {
@@ -2066,7 +2092,7 @@ function appendAiMessage(text, msgTime, images, videos, audios, files, tools) {
   wrap.className = 'msg msg-ai'
   const bubble = document.createElement('div')
   bubble.className = 'msg-bubble'
-  appendToolsToEl(bubble, tools)
+  appendToolsToEl(bubble, tools, _sessionKey)
   const textEl = document.createElement('div')
   textEl.className = 'msg-text'
   textEl.innerHTML = renderMarkdown(text || '')
@@ -2173,14 +2199,15 @@ function appendFilesToEl(el, files) {
   })
 }
 
-function mergeToolEventData(entry) {
+function mergeToolEventData(entry, sessionKey) {
   const id = entry?.id || entry?.tool_call_id
   if (!id) return entry
+  const state = getSessionState(sessionKey)
   const runId = entry?.runId || entry?.run_id || entry?.run || ''
   const key = runId ? `${runId}:${id}` : id
-  let extra = _toolEventData.get(key)
+  let extra = state.toolEventData.get(key)
   if (!extra && runId) {
-    for (const [k, v] of _toolEventData.entries()) {
+    for (const [k, v] of state.toolEventData.entries()) {
       if (k.endsWith(`:${id}`)) { extra = v; break }
     }
   }
@@ -2188,11 +2215,11 @@ function mergeToolEventData(entry) {
   if (entry.input == null && extra.input != null) entry.input = extra.input
   if (entry.output == null && extra.output != null) entry.output = extra.output
   if (entry.status == null && extra.status != null) entry.status = extra.status
-  if (entry.time == null) entry.time = extra.time || _toolEventTimes.get(key) || null
+  if (entry.time == null) entry.time = extra.time || state.toolEventTimes.get(key) || null
   return entry
 }
 
-function upsertTool(tools, entry) {
+function upsertTool(tools, entry, sessionKey) {
   if (!entry) return
   const id = entry.id || entry.tool_call_id
   let target = null
@@ -2210,10 +2237,10 @@ function upsertTool(tools, entry) {
     if (entry.time && target.time == null) target.time = entry.time
     return
   }
-  tools.push(mergeToolEventData(entry))
+  tools.push(mergeToolEventData(entry, sessionKey))
 }
 
-function collectToolsFromMessage(message, tools) {
+function collectToolsFromMessage(message, tools, sessionKey) {
   if (!message || !tools) return
   const toolCalls = message.tool_calls || message.toolCalls || message.tools
   if (Array.isArray(toolCalls)) {
@@ -2228,10 +2255,10 @@ function collectToolsFromMessage(message, tools) {
         input: input || call.meta?.input || null,
         output: null,
         status: call.status || 'ok',
-        time: resolveToolTime(callId, message?.timestamp, message?.runId),
+        time: resolveToolTime(callId, message?.timestamp, message?.runId, sessionKey),
         runId: message?.runId,
         messageTimestamp: message?.timestamp,
-      })
+      }, sessionKey)
     })
   }
   const toolResults = message.tool_results || message.toolResults
@@ -2244,16 +2271,16 @@ function collectToolsFromMessage(message, tools) {
         input: res.input || res.args || res.tool_input || res.toolInput || res.tool?.input || res.tool?.args || res.meta?.input || res.meta?.args || null,
         output: res.output || res.result || res.content || res.tool_output || res.output_text || res.result_text || res.tool?.output || res.meta?.output || null,
         status: res.status || 'ok',
-        time: resolveToolTime(resId, message?.timestamp, message?.runId),
+        time: resolveToolTime(resId, message?.timestamp, message?.runId, sessionKey),
         runId: message?.runId,
         messageTimestamp: message?.timestamp,
-      })
+      }, sessionKey)
     })
   }
 }
 
 /** 渲染工具调用到消息气泡 */
-function appendToolsToEl(el, tools) {
+function appendToolsToEl(el, tools, sessionKey) {
   if (!el) return
   const existing = el.querySelector?.('.msg-tool')
   if (!tools?.length) {
@@ -2298,7 +2325,7 @@ function appendToolsToEl(el, tools) {
     details.className = 'msg-tool-item'
     const summary = document.createElement('summary')
     const status = tool.status === 'error' ? '失败' : '成功'
-    const timeValue = getToolTime(tool) || resolveToolTime(tool.id || tool.tool_call_id, tool.messageTimestamp, tool.runId)
+    const timeValue = getToolTime(tool) || resolveToolTime(tool.id || tool.tool_call_id, tool.messageTimestamp, tool.runId, sessionKey)
     const timeText = timeValue ? formatTime(new Date(timeValue)) : ''
     summary.innerHTML = `${escapeHtml(tool.name || '工具')} · ${status}${timeText ? ' · ' + timeText : ''}`
     const body = document.createElement('div')
@@ -2393,10 +2420,11 @@ function clearMessages() {
   if (_virtualObserver) { _virtualObserver.disconnect(); _virtualObserver = null }
   _autoScrollEnabled = true
   _lastScrollTop = 0
-  _toolEventTimes.clear()
-  _toolEventData.clear()
-  _toolRunIndex.clear()
-  _toolEventSeen.clear()
+  const state = getSessionState(_sessionKey)
+  state.toolEventTimes.clear()
+  state.toolEventData.clear()
+  state.toolRunIndex.clear()
+  state.toolEventSeen.clear()
   if (_virtualTopSpacer) _virtualTopSpacer.style.height = '0px'
   if (_virtualBottomSpacer) _virtualBottomSpacer.style.height = '0px'
 }
@@ -3063,8 +3091,12 @@ async function runHostedAgentStep() {
       _hostedRuntime.errorCount = (_hostedRuntime.errorCount || 0) + 1
       _hostedRuntime.lastError = '托管 Agent 输出未符合模板'
       _hostedRuntime.pending = false
+      _hostedRuntime.status = HOSTED_STATUS.ERROR
+      _hostedRuntime.lastAction = 'error'
       persistHostedRuntime()
       updateHostedBadge()
+      updateHostedInputLock()
+      appendHostedOutput(`托管 Agent 输出未符合模板${formatHostedSummary()}`)
       return
     }
 
@@ -3425,7 +3457,9 @@ function showHostedCompletionModal(summary, content) {
 
 function updateHostedInputLock() {
   const boundKey = getHostedBoundSessionKey()
-  const locked = !!_hostedSessionConfig?.enabled && _hostedRuntime?.status !== HOSTED_STATUS.PAUSED && boundKey === _sessionKey
+  const locked = !!_hostedSessionConfig?.enabled
+    && ( _hostedRuntime?.status === HOSTED_STATUS.RUNNING || _hostedRuntime?.status === HOSTED_STATUS.WAITING )
+    && boundKey === _sessionKey
   if (_textarea) {
     _textarea.disabled = locked
     _textarea.placeholder = locked ? '托管 Agent 已启用，用户输入已锁定' : '输入消息，Enter 发送，/ 打开指令'
@@ -3611,7 +3645,6 @@ export function cleanup() {
   _isStreaming = false
   _isSending = false
   _messageQueue = []
-  _lastHistoryHash = ''
   _hostedBtn = null
   _hostedPanelEl = null
   _hostedBadgeEl = null
@@ -3631,10 +3664,5 @@ export function cleanup() {
   _hostedSeeded = false
   _hostedLastCompletionRunId = ''
   _hostedLastSentHash = ''
-  _toolEventTimes.clear()
-  _toolEventData.clear()
-  _toolRunIndex.clear()
-  _toolEventSeen.clear()
-  _pendingHistoryPayload = null
-  _pendingHistoryTs = 0
+  _sessionStates.clear()
 }
