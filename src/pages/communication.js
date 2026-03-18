@@ -410,7 +410,7 @@ function renderApprovals(el) {
           <option value="both" ${a.mode === 'both' ? 'selected' : ''}>两者都发（both）</option>
         </select>
       </div>
-      ${toggleRow('approvals-forwardExec', '转发执行请求', '将 exec 审批请求转发到渠道（默认关闭，低风险场景可开启）', !!a.enabled)}
+      ${toggleRow('approvals-forwardExec', '转发执行请求', '将 exec 审批请求转发到渠道（默认关闭，低风险场景可开启）', !!a.forwardExec)}
     </div>
   `
   el.querySelectorAll('input, select').forEach(inp => {
