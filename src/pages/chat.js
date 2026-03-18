@@ -169,6 +169,7 @@ let _hostedBusy = false
 let _hostedAbort = null
 let _hostedLastCompletionRunId = ''
 let _hostedLastSentHash = ''
+const _hostedStates = new Map()
 let _askUserBlockedNotice = false
 const _askUserToolHandled = new Set()
 let _currentAiBubble = null, _currentAiText = '', _currentAiImages = [], _currentAiVideos = [], _currentAiAudios = [], _currentAiFiles = [], _currentAiTools = [], _currentRunId = null
@@ -1280,12 +1281,14 @@ function handleChatEvent(payload) {
   const isUiSession = !payload.sessionKey || payload.sessionKey === _sessionKey
   if (!isUiSession) {
     if (state === 'final') {
-      const c = extractChatContent(payload.message)
-      const finalText = c?.text || ''
-      if (finalText && shouldCaptureHostedTarget(payload)) {
-        appendHostedTarget(finalText, payload.timestamp || Date.now())
-        maybeTriggerHostedRun()
-      }
+      return withHostedState(payload.sessionKey, () => {
+        const c = extractChatContent(payload.message)
+        const finalText = c?.text || ''
+        if (finalText && shouldCaptureHostedTarget(payload)) {
+          appendHostedTarget(finalText, payload.timestamp || Date.now())
+          maybeTriggerHostedRun()
+        }
+      })
     }
     return
   }
@@ -2600,49 +2603,143 @@ function getHostedBoundSessionKey() {
   return _hostedSessionConfig?.boundSessionKey || getHostedSessionKey()
 }
 
-function loadHostedSessionConfig() {
+function saveHostedSessionConfigForKey(key, nextConfig) {
   let data = {}
   try { data = JSON.parse(localStorage.getItem(HOSTED_SESSIONS_KEY) || '{}') } catch { data = {} }
-  const key = getHostedSessionKey()
-  if (_hostedSessionConfig?.enabled && _hostedSessionConfig.boundSessionKey && _hostedSessionConfig.boundSessionKey !== key) {
-    updateHostedBadge()
-    updateHostedInputLock()
-    return
-  }
+  data[key] = nextConfig
+  localStorage.setItem(HOSTED_SESSIONS_KEY, JSON.stringify(data))
+}
+
+function buildHostedStateFromStorage(key) {
+  let data = {}
+  try { data = JSON.parse(localStorage.getItem(HOSTED_SESSIONS_KEY) || '{}') } catch { data = {} }
   const current = data[key] || {}
-  _hostedSessionConfig = { ...HOSTED_DEFAULTS, ..._hostedDefaults, ...current }
-  if (!_hostedSessionConfig.boundSessionKey) {
-    _hostedSessionConfig.boundSessionKey = key
+  const config = { ...HOSTED_DEFAULTS, ..._hostedDefaults, ...current }
+  if (!config.boundSessionKey) config.boundSessionKey = key
+  if (!config.systemPrompt && config.prompt) config.systemPrompt = config.prompt
+  if (!config.prompt && config.systemPrompt) config.prompt = config.systemPrompt
+  if (!config.contextTokenLimit) config.contextTokenLimit = _hostedDefaults?.contextTokenLimit || HOSTED_DEFAULTS.contextTokenLimit
+  if (!config.state) config.state = { ...HOSTED_RUNTIME_DEFAULT }
+  if (!config.history) config.history = []
+  config.history = config.history.filter(m => m.role !== 'system')
+  const runtime = { ...HOSTED_RUNTIME_DEFAULT, ...config.state }
+  return {
+    sessionKey: key,
+    config,
+    runtime,
+    seeded: config.history.length > 0,
+    busy: false,
+    lastTargetTs: 0,
+    lastSentHash: '',
+    lastCompletionRunId: '',
   }
-  if (!_hostedSessionConfig.systemPrompt && _hostedSessionConfig.prompt) {
-    _hostedSessionConfig.systemPrompt = _hostedSessionConfig.prompt
+}
+
+function syncHostedGlobalsFromState(state) {
+  _hostedSessionConfig = state.config
+  _hostedRuntime = state.runtime
+  _hostedSeeded = state.seeded
+  _hostedBusy = state.busy
+  _hostedLastTargetTs = state.lastTargetTs
+  _hostedLastSentHash = state.lastSentHash
+  _hostedLastCompletionRunId = state.lastCompletionRunId
+}
+
+function syncHostedStateFromGlobals(state) {
+  state.config = _hostedSessionConfig
+  state.runtime = _hostedRuntime
+  state.seeded = _hostedSeeded
+  state.busy = _hostedBusy
+  state.lastTargetTs = _hostedLastTargetTs
+  state.lastSentHash = _hostedLastSentHash
+  state.lastCompletionRunId = _hostedLastCompletionRunId
+}
+
+function withHostedState(sessionKey, fn) {
+  const prev = {
+    config: _hostedSessionConfig,
+    runtime: _hostedRuntime,
+    seeded: _hostedSeeded,
+    busy: _hostedBusy,
+    lastTargetTs: _hostedLastTargetTs,
+    lastSentHash: _hostedLastSentHash,
+    lastCompletionRunId: _hostedLastCompletionRunId,
   }
-  if (!_hostedSessionConfig.prompt && _hostedSessionConfig.systemPrompt) {
-    _hostedSessionConfig.prompt = _hostedSessionConfig.systemPrompt
+  const key = sessionKey || getHostedSessionKey()
+  const state = getHostedState(key)
+  syncHostedGlobalsFromState(state)
+  try {
+    return fn()
+  } finally {
+    syncHostedStateFromGlobals(state)
+    _hostedStates.set(key, state)
+    saveHostedSessionConfigForKey(key, state.config)
+    _hostedSessionConfig = prev.config
+    _hostedRuntime = prev.runtime
+    _hostedSeeded = prev.seeded
+    _hostedBusy = prev.busy
+    _hostedLastTargetTs = prev.lastTargetTs
+    _hostedLastSentHash = prev.lastSentHash
+    _hostedLastCompletionRunId = prev.lastCompletionRunId
   }
-  if (!_hostedSessionConfig.contextTokenLimit) {
-    _hostedSessionConfig.contextTokenLimit = _hostedDefaults?.contextTokenLimit || HOSTED_DEFAULTS.contextTokenLimit
+}
+
+async function withHostedStateAsync(sessionKey, fn) {
+  const prev = {
+    config: _hostedSessionConfig,
+    runtime: _hostedRuntime,
+    seeded: _hostedSeeded,
+    busy: _hostedBusy,
+    lastTargetTs: _hostedLastTargetTs,
+    lastSentHash: _hostedLastSentHash,
+    lastCompletionRunId: _hostedLastCompletionRunId,
   }
-  if (!_hostedSessionConfig.state) _hostedSessionConfig.state = { ...HOSTED_RUNTIME_DEFAULT }
-  if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
-  _hostedSessionConfig.history = _hostedSessionConfig.history.filter(m => m.role !== 'system')
-  _hostedRuntime = { ...HOSTED_RUNTIME_DEFAULT, ..._hostedSessionConfig.state }
-  _hostedSeeded = _hostedSessionConfig.history.length > 0
+  const key = sessionKey || getHostedSessionKey()
+  const state = getHostedState(key)
+  syncHostedGlobalsFromState(state)
+  try {
+    return await fn()
+  } finally {
+    syncHostedStateFromGlobals(state)
+    _hostedStates.set(key, state)
+    saveHostedSessionConfigForKey(key, state.config)
+    _hostedSessionConfig = prev.config
+    _hostedRuntime = prev.runtime
+    _hostedSeeded = prev.seeded
+    _hostedBusy = prev.busy
+    _hostedLastTargetTs = prev.lastTargetTs
+    _hostedLastSentHash = prev.lastSentHash
+    _hostedLastCompletionRunId = prev.lastCompletionRunId
+  }
+}
+
+function getHostedState(sessionKey) {
+  const key = sessionKey || getHostedSessionKey()
+  if (_hostedStates.has(key)) return _hostedStates.get(key)
+  const state = buildHostedStateFromStorage(key)
+  _hostedStates.set(key, state)
+  return state
+}
+
+function loadHostedSessionConfig() {
+  const key = getHostedSessionKey()
+  const state = getHostedState(key)
+  syncHostedGlobalsFromState(state)
   trimHostedHistoryByTokens()
   updateHostedBadge()
 }
 
 function saveHostedSessionConfig(nextConfig) {
-  let data = {}
-  try { data = JSON.parse(localStorage.getItem(HOSTED_SESSIONS_KEY) || '{}') } catch { data = {} }
-  data[getHostedSessionKey()] = nextConfig
-  localStorage.setItem(HOSTED_SESSIONS_KEY, JSON.stringify(data))
+  saveHostedSessionConfigForKey(getHostedSessionKey(), nextConfig)
 }
 
-function persistHostedRuntime() {
-  if (!_hostedSessionConfig) return
-  _hostedSessionConfig.state = { ..._hostedRuntime }
-  saveHostedSessionConfig(_hostedSessionConfig)
+function persistHostedRuntime(sessionKey) {
+  const key = sessionKey || getHostedSessionKey()
+  const state = getHostedState(key)
+  syncHostedStateFromGlobals(state)
+  state.config.state = { ...state.runtime }
+  _hostedStates.set(key, state)
+  saveHostedSessionConfigForKey(key, state.config)
 }
 
 function updateHostedBadge() {
@@ -2734,7 +2831,7 @@ async function saveHostedConfig() {
     if (!wsClient.gatewayReady || !_sessionKey) {
       toast('Gateway 未就绪，暂不启动', 'warning')
     } else {
-      runHostedAgentStep()
+      runHostedAgentStepForSession(getHostedBoundSessionKey())
     }
   }
 
@@ -2833,7 +2930,7 @@ function maybeTriggerHostedRun() {
     _hostedRuntime.status = HOSTED_STATUS.IDLE
   }
   _hostedRuntime.lastAction = ''
-  runHostedAgentStep()
+  runHostedAgentStepForSession(getHostedBoundSessionKey())
 }
 
 function normalizeHostedRole(role) {
@@ -2858,6 +2955,20 @@ function buildHostedMessages() {
 function detectStopFromText(text) {
   if (!text) return false
   return /\b(完成|无需继续|结束|停止|done|stop|final)\b/i.test(text)
+}
+
+async function runHostedAgentStepForSession(sessionKey) {
+  const key = sessionKey || getHostedBoundSessionKey()
+  if (!key) return
+  if (key === getHostedSessionKey()) {
+    return runHostedAgentStep()
+  }
+  return withHostedStateAsync(key, async () => {
+    if (_hostedSessionConfig?.boundSessionKey !== key) {
+      _hostedSessionConfig.boundSessionKey = key
+    }
+    return runHostedAgentStep()
+  })
 }
 
 async function runHostedAgentStep() {
@@ -2965,7 +3076,7 @@ async function runHostedAgentStep() {
     const delay = _hostedSessionConfig.stepDelayMs || HOSTED_DEFAULTS.stepDelayMs
     setTimeout(() => {
       _hostedBusy = false
-      runHostedAgentStep()
+      runHostedAgentStepForSession(getHostedBoundSessionKey())
     }, delay)
     return
   } finally {
@@ -3365,16 +3476,18 @@ function showAskUserCardChat({ question, type, options, placeholder, toolId }) {
 function appendHostedOutput(text) {
   if (!text) return
   if (!text.startsWith('[托管 Agent]')) text = `[托管 Agent] ${text}`
-  const wrap = document.createElement('div')
-  wrap.className = 'msg msg-system msg-hosted'
-  wrap.textContent = text
-  insertMessageByTime(wrap, Date.now())
-  scrollToBottom()
+  const boundKey = getHostedBoundSessionKey()
+  if (boundKey === _sessionKey) {
+    const wrap = document.createElement('div')
+    wrap.className = 'msg msg-system msg-hosted'
+    wrap.textContent = text
+    insertMessageByTime(wrap, Date.now())
+    scrollToBottom()
+  }
 
   const hash = `${text.length}:${text.slice(0, 120)}`
   if (hash === _hostedLastSentHash) return
   _hostedLastSentHash = hash
-  const boundKey = getHostedBoundSessionKey()
   if (boundKey && wsClient.gatewayReady) {
     wsClient.chatSend(boundKey, text).catch(() => {})
   }
