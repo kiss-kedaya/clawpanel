@@ -811,61 +811,7 @@ function playModeTransition(page, modeKey) {
 
 function buildSystemPrompt() {
   return buildSystemPromptCore({ config: _config, soulCache: _soulCache, knowledgeBase: OPENCLAW_KB })
-
-  let prompt = ''
-
-  // 灵魂移植模式：用 OpenClaw Agent 的身份替代默认人设
-  if (_config?.soulSource?.startsWith('openclaw:') && _soulCache) {
-    prompt += '# 你的身份\n'
-    if (_soulCache.identity) prompt += _soulCache.identity + '\n\n'
-    if (_soulCache.soul) prompt += '# 灵魂\n' + _soulCache.soul + '\n\n'
-    if (_soulCache.user) prompt += '# 你的用户\n' + _soulCache.user + '\n\n'
-    if (_soulCache.agents) {
-      // 截断 AGENTS.md 到约 4000 字符以节省 token
-      const agentsContent = _soulCache.agents.length > 4000 ? _soulCache.agents.slice(0, 4000) + '\n\n[...已截断]' : _soulCache.agents
-      prompt += '# 操作规则\n' + agentsContent + '\n\n'
-    }
-    if (_soulCache.tools) prompt += '# 工具笔记\n' + _soulCache.tools + '\n\n'
-    if (_soulCache.memory) {
-      const memContent = _soulCache.memory.length > 3000 ? _soulCache.memory.slice(-3000) : _soulCache.memory
-      prompt += '# 长期记忆\n' + memContent + '\n\n'
-    }
-    if (_soulCache.recentMemories?.length) {
-      prompt += '# 最近记忆\n'
-      for (const m of _soulCache.recentMemories) {
-        const content = m.content.length > 800 ? m.content.slice(0, 800) + '...' : m.content
-        prompt += `## ${m.date}\n${content}\n\n`
-      }
-    }
-    // 追加 ClawPanel 特有的产品知识和工具说明
-    prompt += '\n# ClawPanel 工具能力\n你同时是 ClawPanel 内置助手，拥有以下额外能力：\n'
-    prompt += '- 执行终端命令、读写文件、浏览目录\n'
-    prompt += '- 联网搜索和网页抓取\n'
-    prompt += '- 管理 OpenClaw 配置和服务\n'
-    prompt += '- 你精通 OpenClaw 的架构、配置、Gateway、Agent 管理\n'
-  } else {
-    prompt += getSystemPromptBase()
-  }
-
-  const modeKey = currentMode()
-  const mode = MODES[modeKey]
-
-  // 模式说明
-  prompt += `\n\n## 当前模式：${mode.label}模式`
-
-  if (modeKey === 'chat') {
-    prompt += '\n你处于纯聊天模式，没有任何工具可用。请通过文字回答问题，给出具体的命令建议供用户手动执行。'
-    prompt += '\n如果用户需要你执行操作，建议用户切换到「执行」或「规划」模式。'
-  } else {
-    // 规划模式特殊指令
-    if (modeKey === 'plan') {
-      prompt += '\n**你处于规划模式**：可以调用工具读取信息、分析问题，但 **绝对不能修改任何文件**（write_file 已禁用）。'
-      prompt += '\n你的任务是：分析问题 → 制定方案 → 输出详细步骤，让用户确认后再切换到执行模式操作。'
-      prompt += '\n即使使用 run_command，也只能执行只读命令（查看、检查、列出），不要执行任何修改操作。'
-    }
-    if (modeKey === 'unlimited') {
-      prompt += '\n**你处于无限模式**：所有工具调用无需用户确认，请高效完成任务。'
-    }
+}
 
     prompt += '\n\n### 可用工具'
     prompt += '\n- **用户交互**: ask_user — 向用户提问（单选/多选/文本），获取结构化回答。需要用户做决定时优先用此工具。'
@@ -891,43 +837,6 @@ function buildSystemPrompt() {
     prompt += '\n- **Linux**: bash，标准 Unix 命令'
     prompt += '\n- **绝对禁止** cmd.exe 语法（dir、type、findstr、netstat）'
     prompt += '\n- **一次只执行一条命令**，等结果出来再决定下一步'
-    prompt += '\n- **不要重复执行相同的命令**'
-    prompt += '\n\n### 跨平台路径'
-    prompt += '\n- Windows: `$env:USERPROFILE\\.openclaw\\`'
-    prompt += '\n- macOS/Linux: `~/.openclaw/`'
-    prompt += '\n\n### 工具使用原则'
-    prompt += '\n- 先 get_system_info，再根据 OS 执行正确命令'
-    prompt += '\n- 优先用 read_file / list_directory / list_processes / check_port 等专用工具，减少 run_command 使用'
-    prompt += '\n- 主动使用工具，不要只建议用户手动操作'
-    if (mode.confirmDanger) {
-      prompt += '\n- 执行破坏性操作前先告知用户'
-    }
-  }
-
-  // 注入内置技能列表
-  prompt += '\n\n## 内置技能卡片'
-  prompt += '\n用户可以在欢迎页点击技能卡片快速触发操作。当用户遇到问题时，你也可以主动推荐合适的技能：'
-  for (const s of BUILTIN_SKILLS) {
-    prompt += `\n- **${s.name}**（${s.desc}）`
-  }
-  prompt += '\n\n当用户的需求匹配某个技能时，可以建议用户点击对应的技能卡片，或者你直接按技能的步骤操作。'
-
-  // 注入内置 OpenClaw 知识库
-  prompt += '\n\n' + OPENCLAW_KB
-
-  // 注入用户自定义知识库内容
-  const kbEnabled = (_config.knowledgeFiles || []).filter(f => f.enabled !== false && f.content)
-  if (kbEnabled.length > 0) {
-    prompt += '\n\n## 用户自定义知识库'
-    prompt += '\n以下是用户提供的参考知识，回答问题时请优先参考这些内容：'
-    for (const kb of kbEnabled) {
-      const content = kb.content.length > 5000 ? kb.content.slice(0, 5000) + '\n\n[...内容已截断]' : kb.content
-      prompt += `\n\n### ${kb.name}\n${content}`
-    }
-  }
-
-  return prompt
-}
 
 // ── 灵魂移植：扫描可用 Agent ──
 async function scanOpenClawAgents() {
@@ -2050,6 +1959,29 @@ function convertToolsForGemini(tools) {
   }))}]
 }
 
+// 上下文裁剪：保留图片消息，避免多模态丢失
+function trimContextPreserveImages(messages, maxTokens) {
+  const trimmed = trimContextCore(messages, maxTokens)
+  const trimmedSet = new Set(trimmed)
+  const imageMessages = messages.filter(m => Array.isArray(m.content) && m.content.some(b => b?.type === 'image_url' || b?.type === 'image'))
+  if (!imageMessages.length) return trimmed
+  const merged = [...trimmed]
+  imageMessages.forEach(msg => {
+    if (trimmedSet.has(msg)) return
+    merged.push(msg)
+  })
+  if (merged.length <= maxTokens) return merged
+  const pinned = new Set(imageMessages)
+  const compact = []
+  for (let i = merged.length - 1; i >= 0; i--) {
+    const msg = merged[i]
+    if (compact.length >= maxTokens && !pinned.has(msg)) continue
+    compact.unshift(msg)
+    if (compact.length >= maxTokens && pinned.has(msg)) continue
+  }
+  return compact
+}
+
 // 工具调用执行（共用逻辑）
 async function executeToolWithSafety(toolName, args, tcForConfirm) {
   let result = '', approved = true
@@ -2090,21 +2022,18 @@ async function callAIWithTools(sessionId, messages, onStatus, onToolProgress) {
       return result
     },
     execTool: async ({ name, args }) => {
-      toolHistory.push({ name, args, result: null, approved: true, pending: true })
+      const entry = { name, args, result: null, approved: true, pending: true }
+      toolHistory.push(entry)
       if (typeof onToolProgress === 'function') onToolProgress(toolHistory)
-      let result = ''
-      try {
-        result = await executeTool(name, args)
-      } catch (err) {
-        result = `执行失败: ${typeof err === 'string' ? err : err.message || JSON.stringify(err)}`
-      }
+      const execResult = await executeToolWithSafety(name, args, { function: { name, arguments: JSON.stringify(args || {}) } })
       const last = toolHistory[toolHistory.length - 1]
       if (last) {
-        last.result = result
+        last.result = execResult.result
+        last.approved = execResult.approved
         last.pending = false
       }
       if (typeof onToolProgress === 'function') onToolProgress(toolHistory)
-      return result
+      return execResult.result
     },
   }
   if (typeof onStatus === 'function') onStatus('AI 思考中...')
@@ -3381,7 +3310,7 @@ async function sendMessageDirect(text) {
 
   // 准备 AI 上下文（只保留 role + content，剔除内部字段）
   // 过滤掉空的 AI 回复，避免污染上下文导致模型也返回空
-  const contextMessages = trimContextCore(
+  const contextMessages = trimContextPreserveImages(
     session.messages
       .filter(m => {
         if (m.role === 'user') return true
@@ -3533,7 +3462,7 @@ async function retryAIResponse(session) {
   if (!session?.id) return
   if (getStreaming(session.id)) return
 
-  const contextMessages = trimContextCore(
+  const contextMessages = trimContextPreserveImages(
     session.messages.filter(m => m.role === 'user' || m.role === 'assistant'),
     MAX_CONTEXT_TOKENS
   )
