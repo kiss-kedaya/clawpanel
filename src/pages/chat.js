@@ -329,6 +329,7 @@ export async function render() {
           </div>
         </div>
         <div class="hosted-agent-footer" id="hosted-agent-status"></div>
+        <div class="hosted-agent-footer" id="hosted-agent-bound"></div>
       </div>
       <div class="chat-disconnect-bar" id="chat-disconnect-bar" style="display:none">连接已断开，正在重连...</div>
       <div class="chat-connect-overlay" id="chat-connect-overlay" style="display:none">
@@ -1268,11 +1269,26 @@ function handleEvent(msg) {
 }
 
 function handleChatEvent(payload) {
-  // sessionKey 过滤
-  if (payload.sessionKey && payload.sessionKey !== _sessionKey && _sessionKey) return
+  const boundKey = getHostedBoundSessionKey()
+  const isBoundSession = !!(payload.sessionKey && boundKey && payload.sessionKey === boundKey)
+  // sessionKey 过滤：非当前 UI 且非绑定会话直接忽略
+  if (payload.sessionKey && payload.sessionKey !== _sessionKey && !isBoundSession) return
 
   const { state } = payload
   const runId = payload.runId
+
+  const isUiSession = !payload.sessionKey || payload.sessionKey === _sessionKey
+  if (!isUiSession) {
+    if (state === 'final') {
+      const c = extractChatContent(payload.message)
+      const finalText = c?.text || ''
+      if (finalText && shouldCaptureHostedTarget(payload)) {
+        appendHostedTarget(finalText, payload.timestamp || Date.now())
+        maybeTriggerHostedRun()
+      }
+    }
+    return
+  }
 
   // 重复 run 过滤：跳过已完成的 runId 的后续事件（Gateway 可能对同一消息触发多个 run）
   if (runId && state === 'final' && _seenRunIds.has(runId)) {
@@ -1332,12 +1348,10 @@ function handleChatEvent(payload) {
       finalTools = ids.map(id => mergeToolEventData({ id, name: '工具' })).filter(Boolean)
     }
 
-    // 托管 Agent：记录对面回复并触发下一步
-    if (payload.sessionKey === _sessionKey || !_sessionKey) {
-      if (finalText && shouldCaptureHostedTarget(payload)) {
-        appendHostedTarget(finalText, payload.timestamp || Date.now())
-        maybeTriggerHostedRun()
-      }
+    // 托管 Agent：记录对面回复并触发下一步（绑定会话亦可）
+    if (finalText && shouldCaptureHostedTarget(payload)) {
+      appendHostedTarget(finalText, payload.timestamp || Date.now())
+      maybeTriggerHostedRun()
     }
     if (finalImages.length) _currentAiImages = finalImages
     if (finalVideos.length) _currentAiVideos = finalVideos
@@ -2582,12 +2596,24 @@ function getHostedSessionKey() {
   return _sessionKey || localStorage.getItem(STORAGE_SESSION_KEY) || 'agent:main:main'
 }
 
+function getHostedBoundSessionKey() {
+  return _hostedSessionConfig?.boundSessionKey || getHostedSessionKey()
+}
+
 function loadHostedSessionConfig() {
   let data = {}
   try { data = JSON.parse(localStorage.getItem(HOSTED_SESSIONS_KEY) || '{}') } catch { data = {} }
   const key = getHostedSessionKey()
+  if (_hostedSessionConfig?.enabled && _hostedSessionConfig.boundSessionKey && _hostedSessionConfig.boundSessionKey !== key) {
+    updateHostedBadge()
+    updateHostedInputLock()
+    return
+  }
   const current = data[key] || {}
   _hostedSessionConfig = { ...HOSTED_DEFAULTS, ..._hostedDefaults, ...current }
+  if (!_hostedSessionConfig.boundSessionKey) {
+    _hostedSessionConfig.boundSessionKey = key
+  }
   if (!_hostedSessionConfig.systemPrompt && _hostedSessionConfig.prompt) {
     _hostedSessionConfig.systemPrompt = _hostedSessionConfig.prompt
   }
@@ -2652,6 +2678,8 @@ function renderHostedPanel() {
   if (!_hostedPanelEl || !_hostedSessionConfig) return
   if (_hostedPromptEl) _hostedPromptEl.value = _hostedSessionConfig.prompt || ''
   if (_hostedEnableEl) _hostedEnableEl.checked = !!_hostedSessionConfig.enabled
+  const boundEl = _hostedPanelEl.querySelector('#hosted-agent-bound')
+  if (boundEl) boundEl.textContent = `绑定会话：${_hostedSessionConfig.boundSessionKey || '未知'}`
   if (_hostedMaxStepsEl) _hostedMaxStepsEl.value = _hostedSessionConfig.maxSteps || HOSTED_DEFAULTS.maxSteps
   if (_hostedContextLimitEl) _hostedContextLimitEl.value = _hostedSessionConfig.contextTokenLimit || HOSTED_DEFAULTS.contextTokenLimit
   const statusEl = _hostedPanelEl.querySelector('#hosted-agent-status')
@@ -2687,6 +2715,7 @@ async function saveHostedConfig() {
     maxSteps,
     stepDelayMs,
     retryLimit,
+    boundSessionKey: _sessionKey,
   }
 
   if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
@@ -2769,6 +2798,8 @@ function stopHostedAgent() {
 
 function shouldCaptureHostedTarget(payload) {
   if (!_hostedSessionConfig?.enabled) return false
+  const boundKey = getHostedBoundSessionKey()
+  if (payload?.sessionKey && boundKey && payload.sessionKey !== boundKey) return false
   if (_hostedRuntime.status === HOSTED_STATUS.PAUSED || _hostedRuntime.status === HOSTED_STATUS.ERROR) return false
   if (payload?.message?.role && payload.message.role !== 'assistant') return false
   const ts = payload?.timestamp || Date.now()
@@ -2837,7 +2868,8 @@ async function runHostedAgentStep() {
   if (_hostedBusy || !_hostedSessionConfig.enabled) return
   const prompt = (_hostedSessionConfig.prompt || '').trim()
   if (!prompt) return
-  if (!wsClient.gatewayReady || !_sessionKey) {
+  const boundKey = getHostedBoundSessionKey()
+  if (!wsClient.gatewayReady || !boundKey) {
     _hostedRuntime.status = HOSTED_STATUS.PAUSED
     _hostedRuntime.lastError = 'Gateway 未就绪或 sessionKey 缺失'
     _hostedRuntime.lastAction = 'paused'
@@ -3247,7 +3279,8 @@ function showHostedCompletionModal(summary, content) {
 }
 
 function updateHostedInputLock() {
-  const locked = !!_hostedSessionConfig?.enabled && _hostedRuntime?.status !== HOSTED_STATUS.PAUSED
+  const boundKey = getHostedBoundSessionKey()
+  const locked = !!_hostedSessionConfig?.enabled && _hostedRuntime?.status !== HOSTED_STATUS.PAUSED && boundKey === _sessionKey
   if (_textarea) {
     _textarea.disabled = locked
     _textarea.placeholder = locked ? '托管 Agent 已启用，用户输入已锁定' : '输入消息，Enter 发送，/ 打开指令'
@@ -3341,8 +3374,9 @@ function appendHostedOutput(text) {
   const hash = `${text.length}:${text.slice(0, 120)}`
   if (hash === _hostedLastSentHash) return
   _hostedLastSentHash = hash
-  if (_sessionKey && wsClient.gatewayReady) {
-    wsClient.chatSend(_sessionKey, text).catch(() => {})
+  const boundKey = getHostedBoundSessionKey()
+  if (boundKey && wsClient.gatewayReady) {
+    wsClient.chatSend(boundKey, text).catch(() => {})
   }
 }
 
