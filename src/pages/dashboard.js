@@ -139,7 +139,9 @@ async function loadDashboardData(page, fullRefresh = false) {
   _dashboardInitialized = true
 }
 
-function renderStatCards(page, services, version, agents, config) {\n  services = Array.isArray(services) ? services : []\n  version = version || {}
+function renderStatCards(page, services, version, agents, config) {
+  services = Array.isArray(services) ? services : []
+  version = version || {}
   const cardsEl = page.querySelector('#stat-cards')
   const gw = services.find(s => s.label === 'ai.openclaw.gateway')
   const runningCount = services.filter(s => s.running).length
@@ -199,7 +201,8 @@ function renderStatCards(page, services, version, agents, config) {\n  services 
   `
 }
 
-function renderOverview(page, services, mcpConfig, backups, config, agents, statusSummary) {\n  services = Array.isArray(services) ? services : []
+function renderOverview(page, services, mcpConfig, backups, config, agents, statusSummary) {
+  services = Array.isArray(services) ? services : []
   const containerEl = page.querySelector('#dashboard-overview-container')
   const gw = services.find(s => s.label === 'ai.openclaw.gateway')
   const mcpCount = mcpConfig?.mcpServers ? Object.keys(mcpConfig.mcpServers).length : 0
