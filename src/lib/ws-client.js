@@ -57,6 +57,7 @@ export class WsClient {
     this._sessionKey = null
     this._pingTimer = null
     this._challengeTimer = null
+    this._connectSent = false
     this._wsId = 0
     this._autoPairAttempts = 0
     this._autoPairing = false
@@ -135,6 +136,7 @@ export class WsClient {
     this._closeWs()
     this._gatewayReady = false
     this._handshaking = false
+    this._connectSent = false
     this._setConnected(false, WS_STATE.CONNECTING)
     const wsId = ++this._wsId
     let ws
@@ -144,14 +146,14 @@ export class WsClient {
     ws.onopen = () => {
       if (wsId !== this._wsId) return
       this._connecting = false
-      this._reconnectAttempts = 0
       this._setConnected(true, WS_STATE.CONNECTED)
       this._startPing()
-      // 等 Gateway 发 connect.challenge，超时则主动发
+      // 等 Gateway 发 connect.challenge，超时则重连
       this._challengeTimer = setTimeout(() => {
         if (!this._handshaking && !this._gatewayReady) {
-          console.log('[ws] 未收到 challenge，主动发 connect')
-          this._sendConnectFrame('')
+          console.log('[ws] 未收到 challenge，重连中...')
+          this._closeWs()
+          this._scheduleReconnect()
         }
       }, CHALLENGE_TIMEOUT)
     }
@@ -229,6 +231,8 @@ export class WsClient {
         this._readyCallbacks.forEach(fn => {
           try { fn(null, null, { error: true, message: errMsg }) } catch {}
         })
+        this._closeWs()
+        this._scheduleReconnect()
         return
       }
       // 握手成功，提取 snapshot
@@ -299,6 +303,8 @@ export class WsClient {
   }
 
   async _sendConnectFrame(nonce) {
+    if (this._connectSent) return
+    this._connectSent = true
     this._handshaking = true
     this._setConnected(false, WS_STATE.HANDSHAKING)
     try {
@@ -311,11 +317,15 @@ export class WsClient {
       console.error('[ws] 生成 connect frame 失败:', e)
       this._handshaking = false
       this._setConnected(false, WS_STATE.ERROR, '生成握手失败')
+      this._closeWs()
+      this._scheduleReconnect()
     }
   }
 
   _handleConnectSuccess(payload) {
     this._autoPairAttempts = 0
+    this._reconnectAttempts = 0
+    this._connectSent = false
     this._hello = payload || null
     this._snapshot = payload?.snapshot || null
     this._serverVersion = payload?.serverVersion || null
@@ -421,11 +431,7 @@ export class WsClient {
           const id = uuid()
           this._ws.send(JSON.stringify({ type: 'req', id, method: 'node.list', params: {} }))
         } catch {}
-        try {
-          const sessionKey = this._sessionKey || `agent:main:main`
-          const id = uuid()
-          this.request('chat.history', { sessionKey, limit: 200 }, { emitEvent: true }).catch(() => {})
-        } catch {}
+        // ping 只保活，不拉取历史
       }
     }, PING_INTERVAL)
   }
