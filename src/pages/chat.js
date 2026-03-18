@@ -3473,23 +3473,39 @@ function showAskUserCardChat({ question, type, options, placeholder, toolId }) {
   card.querySelector('.ast-ask-skip').addEventListener('click', () => submit('用户跳过了此问题'))
 }
 
+function extractHostedInstruction(text) {
+  if (!text) return ''
+  const raw = String(text)
+  const withoutPrefix = raw.replace(/^\[托管 Agent\]\s*/g, '')
+  const markerIndex = withoutPrefix.indexOf('@OpenClaw-Agent')
+  if (markerIndex < 0) return ''
+  const tail = withoutPrefix.slice(markerIndex)
+  const stopMatch = tail.match(/\n\s*(\*\*\s*)?给用户的回复|\n\s*(\*\*\s*)?给用户回复|\n\s*(\*\*\s*)?给用户的回复（最终输出给用户）/)
+  if (!stopMatch) return tail.trim()
+  return tail.slice(0, stopMatch.index).trim()
+}
+
 function appendHostedOutput(text) {
   if (!text) return
-  if (!text.startsWith('[托管 Agent]')) text = `[托管 Agent] ${text}`
+  const rawText = String(text)
+  let displayText = rawText
+  if (!displayText.startsWith('[托管 Agent]')) displayText = `[托管 Agent] ${displayText}`
   const boundKey = getHostedBoundSessionKey()
   if (boundKey === _sessionKey) {
     const wrap = document.createElement('div')
     wrap.className = 'msg msg-system msg-hosted'
-    wrap.textContent = text
+    wrap.textContent = displayText
     insertMessageByTime(wrap, Date.now())
     scrollToBottom()
   }
 
-  const hash = `${text.length}:${text.slice(0, 120)}`
+  const instruction = extractHostedInstruction(rawText)
+  if (!instruction) return
+  const hash = `${instruction.length}:${instruction.slice(0, 120)}`
   if (hash === _hostedLastSentHash) return
   _hostedLastSentHash = hash
   if (boundKey && wsClient.gatewayReady) {
-    wsClient.chatSend(boundKey, text).catch(() => {})
+    wsClient.chatSend(boundKey, instruction).catch(() => {})
   }
 }
 
