@@ -54,18 +54,15 @@ const HOSTED_FIXED_SYSTEM_PROMPT = `你现在是 **「OpenClaw 托管指挥官�
 ### 核心规则（必须严格遵守）
 1. 你**没有工具调用权限**，也不能使用任何 skills、分代理、子代理、function calling。
 2. 所有需要工具、技能、浏览器、代码执行、文件操作等工作，**必须全部交给对面Agent**。
-3. 默认情况下你应自行做主，不要把大事小事都抛给用户。只有在缺少关键信息时才向用户提问。
-4. 当需要用户补充信息时，指示对面Agent使用用户交互工具（ask_user）提问，并等待用户回复后再继续。
-4.1 若需要 ask_user，请在输出中包含如下格式（便于系统触发交互）：
-[ASK_USER]
-{"question":"请提供信息","type":"text","options":[],"placeholder":""}
-[/ASK_USER]
-5. 你只能做三件事：
+3. 默认情况下你应自行做主，不要把大事小事都抛给用户，托管模式下禁止要求用户二次确认。
+4. 当关键信息缺失时，优先基于现有上下文继续推进；如果确实无法继续，请明确说明缺失点并停止在等待状态，不要输出 ask_user、confirm 或其他交互请求。
+5. 当你发现可复用的经验、踩坑、根因、修复策略、稳定工作流时，必须主动要求对面Agent把这些内容沉淀到项目核心文档和 memory 文件夹；优先写入项目 docs/ 下的核心文档或计划文档，并同步写入 memory/ 下的对应记录，避免经验只留在聊天记录里。
+6. 你只能做三件事：
  - 理解用户需求
  - 思考规划
  - 下达明确指令 + 回复用户
-6. 你永远保持专业、冷静、高效、结构化。
-7. 你要获取任何消息都可以让对面Agent调用工具获取后发送给你.
+7. 你永远保持专业、冷静、高效、结构化。
+8. 你要获取任何消息都可以让对面Agent调用工具获取后发送给你.
 
 ### 输出格式（必须严格使用以下结构）
 
@@ -114,6 +111,8 @@ const HOSTED_RUNTIME_DEFAULT = {
   contextTokens: 0,
   lastTrimAt: 0,
   lastAction: '',
+  lastSpecialText: '',
+  lastSpecialTs: 0,
 }
 
 const HOSTED_CONTEXT_MAX = 100
@@ -173,11 +172,12 @@ let _hostedRuntime = { ...HOSTED_RUNTIME_DEFAULT }
 let _hostedAutoTimer = null
 let _hostedDisconnectTimer = null
 let _hostedLastTargetTs = 0
+let _hostedLastTargetHash = ''
 let _hostedBusy = false
 let _hostedAbort = null
 let _hostedLastCompletionRunId = ''
 let _hostedLastSentHash = ''
-let _hostedNeedsHistoryRefresh = false
+const _hostedHistoryRefreshKeys = new Set()
 const _hostedStates = new Map()
 let _askUserBlockedNotice = false
 const _askUserToolHandled = new Set()
@@ -199,7 +199,6 @@ let _virtualTopSpacer = null
 let _virtualBottomSpacer = null
 let _virtualRenderPending = false
 let _virtualObserver = null
-let _autoScrollEnabled = true, _lastScrollTop = 0, _touchStartY = 0
 
 let _streamSafetyTimer = null, _unsubEvent = null, _unsubReady = null, _unsubStatus = null
 let _pageActive = false
@@ -218,6 +217,7 @@ function getSessionState(sessionKey) {
   if (!_sessionStates.has(key)) {
     _sessionStates.set(key, {
       lastHistoryHash: '',
+      lastHistoryAppliedTs: 0,
       pendingHistoryPayload: null,
       pendingHistoryTs: 0,
       seenRunIds: new Set(),
@@ -562,22 +562,8 @@ function bindEvents(page) {
   _messagesEl.addEventListener('scroll', () => {
     const { scrollTop, scrollHeight, clientHeight } = _messagesEl
     _scrollBtn.style.display = (scrollHeight - scrollTop - clientHeight < 80) ? 'none' : 'flex'
-    if (scrollTop < _lastScrollTop - 2) _autoScrollEnabled = false
-    if (isAtBottom()) _autoScrollEnabled = true
-    _lastScrollTop = scrollTop
   })
-  _messagesEl.addEventListener('wheel', (e) => {
-    if (e.deltaY < 0) _autoScrollEnabled = false
-  }, { passive: true })
-  _messagesEl.addEventListener('touchstart', (e) => {
-    _touchStartY = e.touches?.[0]?.clientY || 0
-  }, { passive: true })
-  _messagesEl.addEventListener('touchmove', (e) => {
-    const y = e.touches?.[0]?.clientY || 0
-    if (y > _touchStartY + 2) _autoScrollEnabled = false
-  }, { passive: true })
   _scrollBtn.addEventListener('click', () => {
-    _autoScrollEnabled = true
     scrollToBottom(true)
   })
   _messagesEl.addEventListener('click', () => { hideCmdPanel(); hideHostedPanel() })
@@ -1348,8 +1334,26 @@ function handleChatEvent(payload) {
   const sessionState = getSessionState(sessionKey)
 
   const isUiSession = !payload.sessionKey || payload.sessionKey === _sessionKey
+
+  // 重复 run 过滤：跳过已完成的 runId 的后续事件（Gateway 可能对同一消息触发多个 run）
+  if (runId && state === 'final' && sessionState.seenRunIds.has(runId)) {
+    console.log('[chat] 跳过重复 final, runId:', runId)
+    return
+  }
+  if (runId && state === 'delta' && sessionState.seenRunIds.has(runId) && !_isStreaming) {
+    console.log('[chat] 跳过已完成 run 的 delta, runId:', runId)
+    return
+  }
+
   if (!isUiSession) {
     if (state === 'final') {
+      if (runId) {
+        sessionState.seenRunIds.add(runId)
+        if (sessionState.seenRunIds.size > 200) {
+          const first = sessionState.seenRunIds.values().next().value
+          sessionState.seenRunIds.delete(first)
+        }
+      }
       return withHostedState(payload.sessionKey, () => {
         const c = extractChatContent(payload.message, sessionKey)
         const finalText = c?.text || ''
@@ -1359,16 +1363,6 @@ function handleChatEvent(payload) {
         }
       })
     }
-    return
-  }
-
-  // 重复 run 过滤：跳过已完成的 runId 的后续事件（Gateway 可能对同一消息触发多个 run）
-  if (runId && state === 'final' && sessionState.seenRunIds.has(runId)) {
-    console.log('[chat] 跳过重复 final, runId:', runId)
-    return
-  }
-  if (runId && state === 'delta' && sessionState.seenRunIds.has(runId) && !_isStreaming) {
-    console.log('[chat] 跳过已完成 run 的 delta, runId:', runId)
     return
   }
 
@@ -1850,14 +1844,20 @@ function extractHistoryMessages(source) {
   return null
 }
 
+function maxHistoryTimestamp(messages = []) {
+  return messages.reduce((max, msg) => Math.max(max, Number(msg?.timestamp || 0)), 0)
+}
+
 function flushPendingHistory(sessionKey = _sessionKey) {
   const key = _normalizeSessionKey(sessionKey)
   const state = getSessionState(key)
   if (!state.pendingHistoryPayload || !_messagesEl) return
   if (_isSending || _isStreaming || _messageQueue.length > 0) return
   const payload = state.pendingHistoryPayload
+  const payloadTs = maxHistoryTimestamp(payload?.messages || [])
   state.pendingHistoryPayload = null
   state.pendingHistoryTs = 0
+  if (payloadTs && payloadTs <= Number(state.lastHistoryAppliedTs || 0)) return
   applyIncrementalHistoryResult(payload, key)
 }
 
@@ -1919,6 +1919,8 @@ function upsertStableSystemBubble({
 function applyIncrementalHistoryResult(result, sessionKey) {
   if (!_messagesEl || !result?.messages?.length) return
   const deduped = dedupeHistory(result.messages, sessionKey)
+  const state = getSessionState(sessionKey)
+  state.lastHistoryAppliedTs = Math.max(Number(state.lastHistoryAppliedTs || 0), maxHistoryTimestamp(result.messages))
   const renderedKeys = getRenderedHistoryKeys()
   let appended = 0
   let hasOmittedImages = false
@@ -1968,10 +1970,11 @@ function applyHistoryResult(result, hasExisting, sessionKey) {
   const deduped = dedupeHistory(result.messages, sessionKey)
   const hash = buildHistoryHash(result.messages)
   const state = getSessionState(sessionKey)
+  state.lastHistoryAppliedTs = Math.max(Number(state.lastHistoryAppliedTs || 0), maxHistoryTimestamp(result.messages))
   if (hash === state.lastHistoryHash && hasExisting) return
   state.lastHistoryHash = hash
 
-  if (!_hostedSeeded && _hostedSessionConfig && (!_hostedSessionConfig.history || _hostedSessionConfig.history.length === 0)) {
+  if (sessionKey === getHostedBoundSessionKey() && !_hostedSeeded && _hostedSessionConfig && (!_hostedSessionConfig.history || _hostedSessionConfig.history.length === 0)) {
     const seeded = deduped
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .slice(-200)
@@ -2468,18 +2471,11 @@ function appendToolsToEl(el, tools, sessionKey) {
       }
     }
   } else if (askUserTools.length) {
-    askUserTools.forEach(tool => {
-      const input = tool.input || {}
-      const fallbackId = `${tool.runId || ''}:${tool.messageTimestamp || ''}:${input.question || input.prompt || ''}`
-      showAskUserCardChat({
-        question: input.question || input.prompt || '请提供信息',
-        type: input.type || 'text',
-        options: input.options || [],
-        placeholder: input.placeholder || '',
-        toolId: tool.id || tool.tool_call_id || tool.tool_use_id || tool.toolUseId || fallbackId,
-      })
-    })
     filtered = tools.filter(t => (t.name || '').toLowerCase() !== 'ask_user')
+    if (!_askUserBlockedNotice) {
+      _askUserBlockedNotice = true
+      appendSystemMessage('托管模式已禁用 ask_user 工具卡片，交互请求不会再弹给用户。')
+    }
   }
 
   if (!filtered.length) {
@@ -2588,8 +2584,6 @@ function clearMessages() {
   _virtualPrefix = [0]
   _virtualPrefixDirty = true
   if (_virtualObserver) { _virtualObserver.disconnect(); _virtualObserver = null }
-  _autoScrollEnabled = true
-  _lastScrollTop = 0
   const state = getSessionState(_sessionKey)
   state.toolEventTimes.clear()
   state.toolEventData.clear()
@@ -2619,15 +2613,15 @@ function showCompactionHint(show) {
 }
 
 function scrollToBottom(force = false) {
-  if (!_messagesEl) return
-  if (!force && !_autoScrollEnabled) return
-  requestAnimationFrame(() => { _messagesEl.scrollTop = _messagesEl.scrollHeight })
-}
-
-function isAtBottom() {
-  if (!_messagesEl) return true
-  const threshold = 80
-  return _messagesEl.scrollHeight - _messagesEl.scrollTop - _messagesEl.clientHeight < threshold
+  if (!_messagesEl || !force) return
+  if (_virtualEnabled) requestVirtualRender(true)
+  requestAnimationFrame(() => {
+    if (!_messagesEl) return
+    _messagesEl.scrollTop = _messagesEl.scrollHeight
+    requestAnimationFrame(() => {
+      if (_messagesEl) _messagesEl.scrollTop = _messagesEl.scrollHeight
+    })
+  })
 }
 
 function ensureVirtualSpacers() {
@@ -2661,7 +2655,6 @@ function requestVirtualRender(force = false) {
 function doVirtualRender() {
   if (!_virtualEnabled || !_messagesEl) return
   ensureVirtualSpacers()
-  const atBottom = isAtBottom()
   const scrollTop = _messagesEl.scrollTop
   const viewport = _messagesEl.clientHeight
   const items = _virtualItems
@@ -2716,11 +2709,9 @@ function doVirtualRender() {
     })
     if (count) _virtualAvgHeight = Math.max(24, Math.round(total / count))
 
-    if (!atBottom || !_autoScrollEnabled) {
-      const newTop = _virtualTopSpacer.offsetHeight
-      const delta = newTop - top
-      if (delta !== 0) _messagesEl.scrollTop = scrollTop + delta
-    }
+    const newTop = _virtualTopSpacer.offsetHeight
+    const delta = newTop - top
+    if (delta !== 0) _messagesEl.scrollTop = scrollTop + delta
   })
 }
 
@@ -2834,6 +2825,7 @@ function buildHostedStateFromStorage(key) {
     seeded: config.history.length > 0,
     busy: false,
     lastTargetTs: 0,
+    lastTargetHash: '',
     lastSentHash: '',
     lastCompletionRunId: '',
   }
@@ -2845,6 +2837,7 @@ function syncHostedGlobalsFromState(state) {
   _hostedSeeded = state.seeded
   _hostedBusy = state.busy
   _hostedLastTargetTs = state.lastTargetTs
+  _hostedLastTargetHash = state.lastTargetHash || ''
   _hostedLastSentHash = state.lastSentHash
   _hostedLastCompletionRunId = state.lastCompletionRunId
 }
@@ -2855,6 +2848,7 @@ function syncHostedStateFromGlobals(state) {
   state.seeded = _hostedSeeded
   state.busy = _hostedBusy
   state.lastTargetTs = _hostedLastTargetTs
+  state.lastTargetHash = _hostedLastTargetHash
   state.lastSentHash = _hostedLastSentHash
   state.lastCompletionRunId = _hostedLastCompletionRunId
 }
@@ -2866,6 +2860,7 @@ function withHostedState(sessionKey, fn) {
     seeded: _hostedSeeded,
     busy: _hostedBusy,
     lastTargetTs: _hostedLastTargetTs,
+    lastTargetHash: _hostedLastTargetHash,
     lastSentHash: _hostedLastSentHash,
     lastCompletionRunId: _hostedLastCompletionRunId,
   }
@@ -2883,6 +2878,7 @@ function withHostedState(sessionKey, fn) {
     _hostedSeeded = prev.seeded
     _hostedBusy = prev.busy
     _hostedLastTargetTs = prev.lastTargetTs
+    _hostedLastTargetHash = prev.lastTargetHash
     _hostedLastSentHash = prev.lastSentHash
     _hostedLastCompletionRunId = prev.lastCompletionRunId
   }
@@ -2895,6 +2891,7 @@ async function withHostedStateAsync(sessionKey, fn) {
     seeded: _hostedSeeded,
     busy: _hostedBusy,
     lastTargetTs: _hostedLastTargetTs,
+    lastTargetHash: _hostedLastTargetHash,
     lastSentHash: _hostedLastSentHash,
     lastCompletionRunId: _hostedLastCompletionRunId,
   }
@@ -2912,6 +2909,7 @@ async function withHostedStateAsync(sessionKey, fn) {
     _hostedSeeded = prev.seeded
     _hostedBusy = prev.busy
     _hostedLastTargetTs = prev.lastTargetTs
+    _hostedLastTargetHash = prev.lastTargetHash
     _hostedLastSentHash = prev.lastSentHash
     _hostedLastCompletionRunId = prev.lastCompletionRunId
   }
@@ -2925,21 +2923,23 @@ function getHostedState(sessionKey) {
   return state
 }
 
-function markHostedHistoryStale() {
-  _hostedNeedsHistoryRefresh = true
+function markHostedHistoryStale(sessionKey = getHostedBoundSessionKey()) {
+  const key = sessionKey || getHostedBoundSessionKey()
+  if (!key) return
+  _hostedHistoryRefreshKeys.add(key)
 }
 
 async function refreshHostedHistoryIfNeeded(options = {}) {
-  const { limit = 100, force = false } = options
-  if (!force && !_hostedNeedsHistoryRefresh) return
-  const key = getHostedBoundSessionKey()
+  const { limit = 100, force = false, sessionKey } = options
+  const key = sessionKey || getHostedBoundSessionKey()
   if (!key || !wsClient.gatewayReady) return
+  if (!force && !_hostedHistoryRefreshKeys.has(key)) return
   try {
     await ensureHostedHistorySeeded(key, limit, true)
-    _hostedNeedsHistoryRefresh = false
+    _hostedHistoryRefreshKeys.delete(key)
   } catch (e) {
     console.warn('[chat][hosted] 刷新历史失败:', e)
-    _hostedNeedsHistoryRefresh = true
+    _hostedHistoryRefreshKeys.add(key)
   }
 }
 
@@ -2964,6 +2964,26 @@ function persistHostedRuntime(sessionKey) {
   saveHostedSessionConfigForKey(key, state.config)
 }
 
+function syncHostedSpecialBubble() {
+  const boundKey = getHostedBoundSessionKey()
+  if (!_hostedSessionConfig?.enabled || boundKey !== _sessionKey) {
+    if (_messagesEl) upsertStableSystemBubble({ statusKey: 'hosted-special', active: false })
+    return
+  }
+  const specialText = String(_hostedRuntime?.lastSpecialText || '').trim()
+  if (!specialText) {
+    if (_messagesEl) upsertStableSystemBubble({ statusKey: 'hosted-special', active: false })
+    return
+  }
+  upsertStableSystemBubble({
+    statusKey: 'hosted-special',
+    text: specialText,
+    statusType: 'hosted-special',
+    ts: _hostedRuntime?.lastSpecialTs || Date.now(),
+    active: true,
+  })
+}
+
 function updateHostedBadge() {
   if (!_hostedBadgeEl || !_hostedSessionConfig) return
   const status = _hostedRuntime.status || HOSTED_STATUS.IDLE
@@ -2974,13 +2994,13 @@ function updateHostedBadge() {
     text = '未启用'
     cls += ' idle'
   } else if (status === HOSTED_STATUS.RUNNING) {
-    text = '运行中'
+    text = _hostedRuntime.lastAction === 'generating-reply' ? '生成回复中' : '运行中'
     cls += ' running'
   } else if (status === HOSTED_STATUS.WAITING) {
     text = '等待回复'
     cls += ' waiting'
   } else if (status === HOSTED_STATUS.PAUSED) {
-    text = '已暂停'
+    text = _hostedRuntime.lastAction === 'disconnected' ? '等待重连' : '已暂停'
     cls += ' paused'
   } else if (status === HOSTED_STATUS.ERROR) {
     text = '异常'
@@ -2992,6 +3012,21 @@ function updateHostedBadge() {
   _hostedBadgeEl.className = cls
   _hostedBadgeEl.textContent = text
   syncHostedStatusBubble(text)
+  syncHostedSpecialBubble()
+}
+
+function formatHostedActionLabel(action) {
+  const map = {
+    '': '',
+    'generating-reply': '生成回复中',
+    'resume-latest-target': '从最新回复恢复',
+    'waiting-target': '等待目标回复',
+    paused: '手动暂停',
+    disconnected: '等待重连',
+    stopped: '已停止',
+    error: '异常中断',
+  }
+  return map[action] || action || ''
 }
 
 function syncHostedStatusBubble(label) {
@@ -3007,7 +3042,8 @@ function syncHostedStatusBubble(label) {
   }
   const reasons = []
   if (_hostedRuntime.stepCount) reasons.push(`步数 ${_hostedRuntime.stepCount}`)
-  if (_hostedRuntime.lastAction) reasons.push(`最近动作 ${_hostedRuntime.lastAction}`)
+  const actionLabel = formatHostedActionLabel(_hostedRuntime.lastAction)
+  if (actionLabel) reasons.push(`最近动作 ${actionLabel}`)
   if (_hostedRuntime.pending) reasons.push('等待下一步触发')
   if (status === HOSTED_STATUS.WAITING) reasons.push('等待对面回复')
   if (_hostedRuntime.lastError && status === HOSTED_STATUS.ERROR) reasons.push(`错误 ${_hostedRuntime.lastError}`)
@@ -3021,7 +3057,6 @@ function syncHostedStatusBubble(label) {
     active: true,
   })
   if (node) node.dataset.hostedStatus = status
-  scrollToBottom()
 }
 
 function renderHostedPanel() {
@@ -3035,12 +3070,17 @@ function renderHostedPanel() {
   const statusEl = _hostedPanelEl.querySelector('#hosted-agent-status')
   if (statusEl) {
     let msg = '状态正常'
-    if (_hostedRuntime.status === HOSTED_STATUS.PAUSED) msg = '已暂停，历史保留'
-    if (_hostedRuntime.lastAction === 'stopped') msg = '已停止，历史已清空'
+    if (_hostedRuntime.status === HOSTED_STATUS.RUNNING && _hostedRuntime.lastAction === 'generating-reply') msg = '正在生成回复'
+    else if (_hostedRuntime.lastAction === 'resume-latest-target') msg = '已接管最新回复，准备继续'
+    else if (_hostedRuntime.status === HOSTED_STATUS.WAITING) msg = '等待对端下一条回复'
+    else if (_hostedRuntime.status === HOSTED_STATUS.PAUSED && _hostedRuntime.lastAction === 'disconnected') msg = '连接断开，等待重连'
+    else if (_hostedRuntime.status === HOSTED_STATUS.PAUSED) msg = '已暂停，历史保留'
+    else if (_hostedRuntime.lastAction === 'stopped') msg = '已停止，历史已清空'
     if (_hostedRuntime.status === HOSTED_STATUS.ERROR) msg = `异常: ${_hostedRuntime.lastError || '未知错误'}`
     if (_hostedRuntime.lastError && _hostedRuntime.status !== HOSTED_STATUS.ERROR) msg = `上次错误: ${_hostedRuntime.lastError}`
     statusEl.textContent = msg
   }
+  syncHostedSpecialBubble()
 }
 
 async function saveHostedConfig() {
@@ -3084,8 +3124,29 @@ async function saveHostedConfig() {
     if (!wsClient.gatewayReady || !_sessionKey) {
       toast('Gateway 未就绪，暂不启动', 'warning')
     } else {
-      await refreshHostedHistoryIfNeeded({ limit: 100, force: true })
-      runHostedAgentStepForSession(getHostedBoundSessionKey())
+      const hostedKey = getHostedBoundSessionKey()
+      markHostedHistoryStale(hostedKey)
+      await refreshHostedHistoryIfNeeded({ limit: 100, force: true, sessionKey: hostedKey })
+      const latestExternal = [...(_hostedSessionConfig.history || [])].reverse().find(item => item && (item.role === 'assistant' || item.role === 'user') && String(item.content || '').trim())
+      const canResumeFromAssistant = latestExternal?.role === 'assistant'
+      if (canResumeFromAssistant) {
+        _hostedLastTargetTs = Number(latestExternal.ts || Date.now())
+        _hostedLastTargetHash = buildHostedTargetHash(latestExternal.content, _hostedLastTargetTs)
+        _hostedRuntime.status = HOSTED_STATUS.IDLE
+        _hostedRuntime.lastAction = 'resume-latest-target'
+        persistHostedRuntime()
+        updateHostedBadge()
+        updateHostedInputLock()
+        appendHostedOutput(`检测到对端最新回复，立即从当前上下文继续${formatHostedSummary()}`)
+        runHostedAgentStepForSession(hostedKey)
+      } else {
+        _hostedRuntime.status = HOSTED_STATUS.WAITING
+        _hostedRuntime.lastAction = 'waiting-target'
+        persistHostedRuntime()
+        updateHostedBadge()
+        updateHostedInputLock()
+        appendHostedOutput(`等待对端新回复后再继续${formatHostedSummary()}`)
+      }
     }
   }
 
@@ -3139,13 +3200,25 @@ function stopHostedAgent() {
   _hostedRuntime.lastRunId = ''
   _hostedRuntime.lastRunAt = 0
   _hostedRuntime.lastAction = 'stopped'
+  _hostedRuntime.lastSpecialText = ''
+  _hostedRuntime.lastSpecialTs = 0
   _hostedSessionConfig.history = []
   _hostedSessionConfig.enabled = false
   _hostedSeeded = false
+  _hostedLastTargetTs = 0
+  _hostedLastTargetHash = ''
+  _hostedLastSentHash = ''
+  _askUserBlockedNotice = false
   persistHostedRuntime()
   updateHostedBadge()
   updateHostedInputLock()
   toast('托管 Agent 已停止', 'info')
+}
+
+function buildHostedTargetHash(text, ts = Date.now()) {
+  const normalizedText = String(text || '').trim()
+  const normalizedTs = Number(ts || Date.now())
+  return `${normalizedTs}:${normalizedText.length}:${normalizedText.slice(0, 240)}`
 }
 
 function shouldCaptureHostedTarget(payload) {
@@ -3154,18 +3227,18 @@ function shouldCaptureHostedTarget(payload) {
   if (payload?.sessionKey && boundKey && payload.sessionKey !== boundKey) return false
   if (_hostedRuntime.status === HOSTED_STATUS.PAUSED || _hostedRuntime.status === HOSTED_STATUS.ERROR) return false
   if (payload?.message?.role && payload.message.role !== 'assistant') return false
-  const ts = payload?.timestamp || Date.now()
-  if (ts && ts === _hostedLastTargetTs) return false
+  const text = String(extractChatContent(payload.message, payload.sessionKey || boundKey)?.text || '').trim()
+  if (!text) return false
+  const ts = Number(payload?.timestamp || Date.now())
+  const hash = buildHostedTargetHash(text, ts)
+  if (hash === _hostedLastTargetHash) return false
   _hostedLastTargetTs = ts
+  _hostedLastTargetHash = hash
   return true
 }
 
 function appendHostedTarget(text, ts) {
-  if (!_hostedSessionConfig) return
-  if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
-  _hostedSessionConfig.history.push({ role: 'assistant', content: text, ts: ts || Date.now() })
-  trimHostedHistoryByTokens()
-  persistHostedRuntime()
+  pushHostedHistoryEntry('assistant', text, ts)
 }
 
 function maybeTriggerHostedRun() {
@@ -3194,15 +3267,46 @@ function normalizeHostedRole(role) {
   return 'user'
 }
 
+function pushHostedHistoryEntry(role, content, ts = Date.now(), options = {}) {
+  if (!_hostedSessionConfig) return false
+  const normalizedRole = role || 'assistant'
+  const normalizedContent = String(content || '').trim()
+  if (!normalizedContent) return false
+  if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
+  const nextTs = Number(ts || Date.now())
+  const last = _hostedSessionConfig.history[_hostedSessionConfig.history.length - 1]
+  const allowReplace = options.allowReplaceTail !== false
+  if (allowReplace && last?.role === normalizedRole && String(last.content || '').trim() === normalizedContent) {
+    if (!last.ts || nextTs >= Number(last.ts || 0)) last.ts = nextTs
+    trimHostedHistoryByTokens()
+    if (options.persist !== false) persistHostedRuntime(options.sessionKey)
+    return false
+  }
+  _hostedSessionConfig.history.push({ role: normalizedRole, content: normalizedContent, ts: nextTs })
+  trimHostedHistoryByTokens()
+  if (options.persist !== false) persistHostedRuntime(options.sessionKey)
+  return true
+}
+
 function buildHostedMessages() {
   trimHostedHistoryByTokens()
-  const history = _hostedSessionConfig?.history || []
-  const systemPrompt = resolveHostedSystemPrompt()
-  const mapped = history.map(item => {
+  const history = (_hostedSessionConfig?.history || [])
+    .filter(item => item && item.content)
+    .slice(-(HOSTED_CONTEXT_MAX || 100))
+  const compacted = []
+  history.forEach(item => {
     const role = normalizeHostedRole(item.role)
-    const prefix = `[${(item.role || role).toUpperCase()}] `
-    return { role, content: prefix + (item.content || '') }
+    const content = String(item.content || '').trim()
+    if (!content) return
+    const prev = compacted[compacted.length - 1]
+    if (prev && prev.role === role && prev.rawRole === (item.role || role) && prev.content === content) return
+    compacted.push({ role, rawRole: item.role || role, content })
   })
+  const systemPrompt = resolveHostedSystemPrompt()
+  const mapped = compacted.map(item => ({
+    role: item.role,
+    content: `[${String(item.rawRole || item.role).toUpperCase()}] ${item.content}`,
+  }))
   if (systemPrompt) mapped.unshift({ role: 'system', content: systemPrompt })
   return mapped
 }
@@ -3230,9 +3334,15 @@ async function ensureHostedHistorySeeded(sessionKey, limit = 200, force = false)
       }))
       .filter(m => m.content)
     if (seeded.length) {
-      _hostedSessionConfig.history = seeded
-      trimHostedHistoryByTokens()
-      persistHostedRuntime(key)
+      const remoteLastTs = seeded.reduce((max, item) => Math.max(max, Number(item.ts || 0)), 0)
+      const localHistory = Array.isArray(_hostedSessionConfig.history) ? _hostedSessionConfig.history : []
+      const localLastTs = localHistory.reduce((max, item) => Math.max(max, Number(item?.ts || 0)), 0)
+      const shouldReplace = force || !localHistory.length || remoteLastTs >= localLastTs
+      if (shouldReplace) {
+        _hostedSessionConfig.history = seeded
+        trimHostedHistoryByTokens()
+        persistHostedRuntime(key)
+      }
     }
     _hostedSeeded = true
   } catch (e) {
@@ -3244,7 +3354,7 @@ async function runHostedAgentStepForSession(sessionKey) {
   const key = sessionKey || getHostedBoundSessionKey()
   if (!key) return
   if (key === getHostedSessionKey()) {
-    await refreshHostedHistoryIfNeeded({ limit: 100, force: true })
+    await refreshHostedHistoryIfNeeded({ limit: 100, force: true, sessionKey: key })
     await ensureHostedHistorySeeded(key)
     return runHostedAgentStep()
   }
@@ -3252,7 +3362,7 @@ async function runHostedAgentStepForSession(sessionKey) {
     if (_hostedSessionConfig?.boundSessionKey !== key) {
       _hostedSessionConfig.boundSessionKey = key
     }
-    await refreshHostedHistoryIfNeeded({ limit: 100, force: true })
+    await refreshHostedHistoryIfNeeded({ limit: 100, force: true, sessionKey: key })
     await ensureHostedHistorySeeded(key)
     return runHostedAgentStep()
   })
@@ -3306,6 +3416,9 @@ async function runHostedAgentStep() {
   }
 
   try {
+    _hostedRuntime.lastAction = 'generating-reply'
+    persistHostedRuntime()
+    updateHostedBadge()
     const messages = buildHostedMessages()
     const result = await callHostedAI(messages)
     const resultText = result?.text || ''
@@ -3328,9 +3441,7 @@ async function runHostedAgentStep() {
     _hostedRuntime.lastError = ''
 
     const rendered = renderHostedTemplate(parsed)
-    _hostedSessionConfig.history.push({ role: 'developer', content: rendered, ts: Date.now() })
-    trimHostedHistoryByTokens()
-    persistHostedRuntime()
+    pushHostedHistoryEntry('developer', rendered, Date.now())
 
     appendHostedOutput(`${rendered}${formatHostedSummary()}`)
 
@@ -3377,7 +3488,7 @@ function resolveHostedTools(config) {
   const policy = _hostedSessionConfig?.toolPolicy || 'inherit'
   if (policy === 'off') return []
   const mode = policy === 'readonly' ? 'plan' : 'execute'
-  return getEnabledTools({ config, mode })
+  return getEnabledTools({ config, mode }).filter(tool => tool?.name !== 'ask_user')
 }
 
 async function hostedExecTool({ name, args }) {
@@ -3431,11 +3542,7 @@ async function hostedExecTool({ name, args }) {
 }
 
 function appendHostedUserReplyToHistory(answer, ts = Date.now()) {
-  if (!_hostedSessionConfig) return
-  if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
-  _hostedSessionConfig.history.push({ role: 'user', content: answer || '', ts })
-  trimHostedHistoryByTokens()
-  persistHostedRuntime(getHostedBoundSessionKey())
+  pushHostedHistoryEntry('user', answer || '', ts, { sessionKey: getHostedBoundSessionKey() })
 }
 
 async function commitHostedUserReply(answer, sessionKey, ts = Date.now()) {
@@ -3545,48 +3652,8 @@ async function callHostedAI(messages) {
   const tools = resolveHostedTools(config)
   const adapters = {
     execTool: hostedExecTool,
-    confirm: async (text) => {
-      const prev = _hostedRuntime.status
-      _hostedRuntime.status = HOSTED_STATUS.WAITING
-      persistHostedRuntime()
-      updateHostedBadge()
-      updateHostedInputLock()
-      const answer = await showAskUserCardChatAsync({
-        question: text || '请确认是否继续',
-        type: 'single',
-        options: ['确认', '取消'],
-        placeholder: '',
-        sessionKey: getHostedBoundSessionKey(),
-        toolId: `hosted-confirm:${getHostedBoundSessionKey()}:${text || ''}`,
-        skipLabel: '取消',
-        skipValue: '取消',
-      })
-      _hostedRuntime.status = prev === HOSTED_STATUS.WAITING ? HOSTED_STATUS.RUNNING : prev
-      persistHostedRuntime()
-      updateHostedBadge()
-      updateHostedInputLock()
-      return String(answer || '').includes('确认')
-    },
-    askUser: async (args) => {
-      const prev = _hostedRuntime.status
-      _hostedRuntime.status = HOSTED_STATUS.WAITING
-      persistHostedRuntime()
-      updateHostedBadge()
-      updateHostedInputLock()
-      const answer = await showAskUserCardChatAsync({
-        question: args.question || args.prompt || '请提供信息',
-        type: args.type || 'text',
-        options: args.options || [],
-        placeholder: args.placeholder || '',
-        sessionKey: getHostedBoundSessionKey(),
-      })
-      const finalAnswer = answer || ''
-      _hostedRuntime.status = prev === HOSTED_STATUS.WAITING ? HOSTED_STATUS.RUNNING : prev
-      persistHostedRuntime()
-      updateHostedBadge()
-      updateHostedInputLock()
-      return { message: finalAnswer }
-    },
+    confirm: async () => true,
+    askUser: async () => ({ message: '托管模式已启用自动执行，不再向用户发起确认或补充询问。请基于现有上下文继续执行。' }),
     knowledgeBase: OPENCLAW_KB,
   }
   if (_hostedAbort) { _hostedAbort.abort(); _hostedAbort = null }
@@ -3935,33 +4002,29 @@ function appendHostedOutput(text) {
   const cleanedText = extracted.text || ''
   let displayText = cleanedText || '托管 Agent 发起用户提问'
   if (!displayText.startsWith('[托管 Agent]')) displayText = `[托管 Agent] ${displayText}`
+  const specialTs = Date.now()
+  _hostedRuntime.lastSpecialText = displayText
+  _hostedRuntime.lastSpecialTs = specialTs
+  persistHostedRuntime(getHostedBoundSessionKey())
   const boundKey = getHostedBoundSessionKey()
   if (boundKey === _sessionKey) {
     upsertStableSystemBubble({
       statusKey: 'hosted-special',
       text: displayText,
       statusType: 'hosted-special',
-      ts: Date.now(),
+      ts: specialTs,
       active: true,
     })
     scrollToBottom()
-    if (extracted.askUser) {
-      const ask = extracted.askUser || {}
-      const askId = `hosted-ask-user:${boundKey}:${ask.question || ''}:${ask.placeholder || ''}:${(ask.options || []).join('|')}`
-      showAskUserCardChat({
-        question: ask.question || ask.prompt || '请提供信息',
-        type: ask.type || 'text',
-        options: ask.options || [],
-        placeholder: ask.placeholder || '',
-        toolId: askId,
-        sessionKey: boundKey,
-      })
+    if (extracted.askUser && !_askUserBlockedNotice) {
+      _askUserBlockedNotice = true
+      appendSystemMessage('托管模式已忽略 ask_user 交互请求，等待自动流程继续或人工手动介入。')
     }
   }
 
   const instruction = extractHostedInstruction(cleanedText || rawText)
   if (!instruction) return
-  const hash = `${instruction.length}:${instruction.slice(0, 120)}`
+  const hash = `${instruction.length}:${instruction.slice(0, 240)}:${instruction.slice(-80)}`
   if (hash === _hostedLastSentHash) return
   _hostedLastSentHash = hash
   if (boundKey && wsClient.gatewayReady) {
@@ -4020,5 +4083,8 @@ export function cleanup() {
   _hostedSeeded = false
   _hostedLastCompletionRunId = ''
   _hostedLastSentHash = ''
+  _hostedLastTargetHash = ''
+  _askUserBlockedNotice = false
+  _hostedHistoryRefreshKeys.clear()
   _sessionStates.clear()
 }

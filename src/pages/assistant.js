@@ -2350,30 +2350,28 @@ function showSettings() {
   const baseUrlInput = overlay.querySelector('#ast-baseurl')
   const apiKeyInput = overlay.querySelector('#ast-apikey')
   const importBtn = overlay.querySelector('#ast-import-openclaw')
-  overlay.querySelectorAll('.ast-preset-btn').forEach(btn => {
-    btn.onclick = () => {
-      baseUrlInput.value = btn.dataset.url
-      apiTypeSelect.value = btn.dataset.api
-      apiTypeSelect.dispatchEvent(new Event('change'))
-      // 切换服务商时清空模型和下拉列表，让用户重新选择或拉取
-      const modelInput = overlay.querySelector('#ast-model')
-      const modelDropdown = overlay.querySelector('#ast-model-dropdown')
-      if (modelInput) modelInput.value = ''
-      if (modelDropdown) { modelDropdown.innerHTML = ''; modelDropdown.style.display = 'none' }
-      // 高亮选中
-      overlay.querySelectorAll('.ast-preset-btn').forEach(b => b.style.opacity = '0.5')
-      btn.style.opacity = '1'
-      // 显示服务商详情
-      const preset = PROVIDER_PRESETS.find(p => p.key === btn.dataset.key)
-      const detailEl = overlay.querySelector('#ast-preset-detail')
-      if (detailEl && preset && (preset.desc || preset.site)) {
-        let html = preset.desc ? `<div style="color:var(--text-secondary);line-height:1.5">${preset.desc}</div>` : ''
-        if (preset.site) html += `<a href="${preset.site}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:11px;margin-top:3px;display:inline-block">→ 访问 ${preset.label}官网</a>`
-        detailEl.innerHTML = html
-        detailEl.style.display = 'block'
-      } else if (detailEl) {
-        detailEl.style.display = 'none'
-      }
+  const presetSelect = overlay.querySelector('#ast-provider-presets')
+  presetSelect?.addEventListener('change', () => {
+    const preset = PROVIDER_PRESETS.find(p => p.key === presetSelect.value)
+    const detailEl = overlay.querySelector('#ast-preset-detail')
+    if (!preset) {
+      if (detailEl) detailEl.style.display = 'none'
+      return
+    }
+    baseUrlInput.value = preset.baseUrl || ''
+    apiTypeSelect.value = preset.api || apiTypeSelect.value
+    apiTypeSelect.dispatchEvent(new Event('change'))
+    const modelInput = overlay.querySelector('#ast-model')
+    const modelDropdown = overlay.querySelector('#ast-model-dropdown')
+    if (modelInput) modelInput.value = ''
+    if (modelDropdown) { modelDropdown.innerHTML = ''; modelDropdown.style.display = 'none' }
+    if (detailEl && (preset.desc || preset.site)) {
+      let html = preset.desc ? `<div style="color:var(--text-secondary);line-height:1.5">${preset.desc}</div>` : ''
+      if (preset.site) html += `<a href="${preset.site}" target="_blank" style="color:var(--accent);text-decoration:none;font-size:11px;margin-top:3px;display:inline-block">→ 访问 ${preset.label}官网</a>`
+      detailEl.innerHTML = html
+      detailEl.style.display = 'block'
+    } else if (detailEl) {
+      detailEl.style.display = 'none'
     }
   })
 
