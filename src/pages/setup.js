@@ -119,7 +119,7 @@ function renderSteps(page, { node, git, cliOk, config, version, cliInfo }) {
   const stepsEl = page.querySelector('#setup-steps')
   const nodeOk = node.installed
   const gitOk = git?.installed || false
-  const allOk = nodeOk && config.installed
+  const allOk = cliOk && config.installed
 
   let html = ''
 
@@ -130,7 +130,7 @@ function renderSteps(page, { node, git, cliOk, config, version, cliInfo }) {
         ${stepIcon(nodeOk)} Node.js 环境
       </div>
       ${nodeOk
-        ? `<p style="color:var(--success);font-size:var(--font-size-sm)">已安装 ${node.version || ''}</p>`
+        ? `<p style="color:var(--success);font-size:var(--font-size-sm)">已安装 ${escapeHtml(node.version || '')}</p>`
         : `<p style="color:var(--text-secondary);font-size:var(--font-size-sm);margin-bottom:var(--space-sm)">
             OpenClaw 基于 Node.js 运行，请先安装。
           </p>
@@ -160,12 +160,12 @@ function renderSteps(page, { node, git, cliOk, config, version, cliInfo }) {
 
   // 第二步：Git
   html += `
-    <div class="config-section" style="text-align:left;${nodeOk ? '' : 'opacity:0.4;pointer-events:none'}">
+    <div class="config-section" style="text-align:left">
       <div class="config-section-title" style="display:flex;align-items:center;gap:4px">
         ${stepIcon(gitOk)} Git 版本管理
       </div>
       ${gitOk
-        ? `<p style="color:var(--success);font-size:var(--font-size-sm)">已安装 ${git.version || ''}</p>
+        ? `<p style="color:var(--success);font-size:var(--font-size-sm)">已安装 ${escapeHtml(git.version || '')}</p>
            <p style="font-size:var(--font-size-xs);color:var(--text-tertiary);margin-top:4px">✅ 已自动配置 Git 使用 HTTPS（避免 SSH 连接问题）</p>`
         : `<p style="color:var(--text-secondary);font-size:var(--font-size-sm);margin-bottom:var(--space-sm);line-height:1.5">
             部分依赖需要 Git 下载源码。点击下方按钮自动安装，如果失败请手动安装。
@@ -184,7 +184,7 @@ function renderSteps(page, { node, git, cliOk, config, version, cliInfo }) {
 
   // 第三步：OpenClaw CLI
   html += `
-    <div class="config-section" style="text-align:left;${nodeOk ? '' : 'opacity:0.4;pointer-events:none'}">
+    <div class="config-section" style="text-align:left">
       <div class="config-section-title" style="display:flex;align-items:center;gap:4px">
         ${stepIcon(cliOk)} OpenClaw CLI
       </div>
@@ -203,7 +203,7 @@ function renderSteps(page, { node, git, cliOk, config, version, cliInfo }) {
              : ''}
            ${version?.ahead_of_recommended && version?.recommended
              ? `<div style="margin-top:8px;padding:8px 12px;background:var(--bg-tertiary);border-radius:var(--radius-sm);font-size:var(--font-size-xs);color:var(--warning,#f59e0b);line-height:1.6">
-                  检测到当前本地 OpenClaw ${version.current || ''} 高于当前面板推荐稳定版 ${version.recommended}，可能存在兼容或稳定性风险。建议稍后到「关于」页回退到推荐版。
+                  检测到当前本地 OpenClaw ${escapeHtml(version.current || '')} 高于当前面板推荐稳定版 ${escapeHtml(version.recommended)}，可能存在兼容或稳定性风险。建议稍后到「关于」页回退到推荐版。
                 </div>`
              : ''}`
         : (config.installed ? `<p style="color:var(--warning,#f59e0b);font-size:var(--font-size-sm)">已检测到配置文件，但 CLI 未安装</p>` : renderInstallSection())
@@ -217,7 +217,7 @@ function renderSteps(page, { node, git, cliOk, config, version, cliInfo }) {
         ${stepIcon(config.installed)} 配置文件
       </div>
       ${config.installed
-        ? `<p style="color:var(--success);font-size:var(--font-size-sm)">配置文件位于 ${config.path || ''}</p>`
+        ? `<p style="color:var(--success);font-size:var(--font-size-sm)">配置文件位于 ${escapeHtml(config.path || '')}</p>`
         : `<p style="color:var(--text-secondary);font-size:var(--font-size-sm);margin-bottom:var(--space-sm)">
             配置文件不存在，点击下方按钮自动创建默认配置。
           </p>
@@ -515,9 +515,9 @@ function bindEvents(page, nodeOk, detectState) {
         resultEl.innerHTML = results.map(r =>
           `<div style="display:flex;align-items:center;gap:6px;margin-top:4px">
             <span style="color:var(--success)">✓</span>
-            <code style="flex:1;background:var(--bg-secondary);padding:2px 6px;border-radius:3px;font-size:11px">${r.path}</code>
-            <span style="font-size:11px;color:var(--text-tertiary)">${r.version}</span>
-            <button class="btn btn-primary btn-sm btn-use-path" data-path="${r.path}" style="font-size:10px;padding:2px 8px">使用</button>
+            <code style="flex:1;background:var(--bg-secondary);padding:2px 6px;border-radius:3px;font-size:11px">${escapeHtml(r.path)}</code>
+            <span style="font-size:11px;color:var(--text-tertiary)">${escapeHtml(r.version)}</span>
+            <button class="btn btn-primary btn-sm btn-use-path" data-path="${escapeHtml(r.path)}" style="font-size:10px;padding:2px 8px">使用</button>
           </div>`
         ).join('')
         resultEl.querySelectorAll('.btn-use-path').forEach(b => {
@@ -548,7 +548,7 @@ function bindEvents(page, nodeOk, detectState) {
       const result = await api.checkNodeAtPath(dir)
       if (result.installed) {
         await api.saveCustomNodePath(dir)
-        resultEl.innerHTML = `<span style="color:var(--success)">✓ 找到 Node.js ${result.version}，路径已保存</span>`
+        resultEl.innerHTML = `<span style="color:var(--success)">✓ 找到 Node.js ${escapeHtml(result.version)}，路径已保存</span>`
         toast('Node.js 路径已保存，正在重新检测...', 'success')
         setTimeout(() => runDetect(page), 300)
       } else {
@@ -592,11 +592,15 @@ function bindEvents(page, nodeOk, detectState) {
 
   // 一键安装
   const installBtn = page.querySelector('#btn-install')
-  if (!installBtn || !nodeOk) return
+  if (!installBtn) return
 
   installBtn.addEventListener('click', async () => {
     const source = page.querySelector('input[name="install-source"]:checked')?.value || 'chinese'
     const method = (source === 'official') ? 'npm' : (page.querySelector('#install-method')?.value || 'auto')
+    if (method === 'npm' && !nodeOk) {
+      toast('需要先安装 Node.js 才能使用 npm 安装', 'warning')
+      return
+    }
     const registry = page.querySelector('#registry-select')?.value
     const modal = showUpgradeModal('安装 OpenClaw')
     let unlistenLog, unlistenProgress
