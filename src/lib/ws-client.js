@@ -430,8 +430,9 @@ export class WsClient {
         try {
           const id = uuid()
           this._ws.send(JSON.stringify({ type: 'req', id, method: 'node.list', params: {} }))
+          const historyId = uuid()
+          this._ws.send(JSON.stringify({ type: 'req', id: historyId, method: 'chat.history', params: { sessionKey: this._sessionKey, limit: 10 } }))
         } catch {}
-        // ping 只保活，不拉取历史
       }
     }, PING_INTERVAL)
   }
