@@ -823,30 +823,6 @@ function buildSystemPrompt() {
   return buildSystemPromptCore({ config: _config, soulCache: _soulCache, knowledgeBase: OPENCLAW_KB })
 }
 
-    prompt += '\n\n### 可用工具'
-    prompt += '\n- **用户交互**: ask_user — 向用户提问（单选/多选/文本），获取结构化回答。需要用户做决定时优先用此工具。'
-    prompt += '\n- **系统信息**: get_system_info — 获取 OS 类型、架构、主目录等。**在执行任何命令前必须先调用此工具**。'
-    prompt += '\n- **进程/端口**: list_processes（按名称过滤）、check_port（检测端口占用）'
-    prompt += '\n- **终端**: run_command — 执行 shell 命令'
-    if (mode.readOnly) {
-      prompt += '\n- **文件**: read_file、list_directory（只读，write_file 已禁用）'
-    } else {
-      prompt += '\n- **文件**: read_file、write_file、list_directory'
-    }
-
-    prompt += '\n\n### 终端命令规范（极其重要）'
-    prompt += '\n- **Windows**: 终端是 **PowerShell**，必须使用 PowerShell 语法：'
-    prompt += '\n  - 列目录: `Get-ChildItem` 或 `ls`（不要用 `dir`）'
-    prompt += '\n  - 看文件: `Get-Content` 或 `cat`（不要用 `type`）'
-    prompt += '\n  - 查进程: `Get-Process | Where-Object { $_.Name -like \"*openclaw*\" }`'
-    prompt += '\n  - 查端口: `Get-NetTCPConnection -LocalPort 18789`'
-    prompt += '\n  - 文件尾: `Get-Content file.log -Tail 50`'
-    prompt += '\n  - 搜内容: `Select-String -Path file.log -Pattern \"ERROR\"`'
-    prompt += '\n  - 环境变量: `$env:USERPROFILE`（不要用 `%USERPROFILE%`）'
-    prompt += '\n- **macOS**: zsh，标准 Unix 命令'
-    prompt += '\n- **Linux**: bash，标准 Unix 命令'
-    prompt += '\n- **绝对禁止** cmd.exe 语法（dir、type、findstr、netstat）'
-    prompt += '\n- **一次只执行一条命令**，等结果出来再决定下一步'
 
 // ── 灵魂移植：扫描可用 Agent ──
 async function scanOpenClawAgents() {
