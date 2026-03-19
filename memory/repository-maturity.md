@@ -20,6 +20,8 @@
 - `applyHistoryResult(...)` 与 `applyIncrementalHistoryResult(...)` 开始复用 render-service，history 主流程已不再完全内联在页面文件中。
 - 新增 `src/lib/history-loader-service.js`，抽离 pending payload 消费判定与本地历史回填逻辑。
 - `flushPendingHistory(...)` 与 `loadHistory(...)` 开始复用 loader helper，history loader 路径继续从页面层剥离。
+- 新增 `src/lib/history-apply-service.js`，抽离 history apply 前的 state 更新、hash 判重与 hosted seed 初始化。
+- `applyHistoryResult(...)` 开始复用 apply-service，history apply 路径继续摆脱页面内联状态判断。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

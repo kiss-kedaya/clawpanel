@@ -46,6 +46,10 @@ import {
   renderLocalHistoryMessages,
   takePendingHistoryPayload,
 } from '../lib/history-loader-service.js'
+import {
+  seedHostedHistoryIfNeeded,
+  updateHistoryApplyState,
+} from '../lib/history-apply-service.js'
 
 const RENDER_THROTTLE = 30
 const STORAGE_SESSION_KEY = 'clawpanel-last-session'
@@ -1821,21 +1825,23 @@ function applyHistoryResult(result, hasExisting, sessionKey) {
     return
   }
   const deduped = dedupeHistory(result.messages, sessionKey)
-  const hash = buildHistoryHash(result.messages)
   const state = getSessionState(sessionKey)
-  state.lastHistoryAppliedTs = Math.max(Number(state.lastHistoryAppliedTs || 0), maxHistoryTimestamp(result.messages))
-  if (hash === state.lastHistoryHash && hasExisting) return
-  state.lastHistoryHash = hash
+  const applyMeta = updateHistoryApplyState(state, result.messages, hasExisting, {
+    maxHistoryTimestamp,
+    buildHistoryHash,
+  })
+  if (applyMeta.shouldSkip) return
 
-  if (sessionKey === getHostedBoundSessionKey() && !_hostedSeeded && _hostedSessionConfig && (!_hostedSessionConfig.history || _hostedSessionConfig.history.length === 0)) {
-    const seeded = toHostedSeedHistory(deduped)
-    if (seeded.length) {
-      _hostedSessionConfig.history = seeded
-      trimHostedHistoryByTokens()
-      persistHostedRuntime()
-    }
-    _hostedSeeded = true
-  }
+  _hostedSeeded = seedHostedHistoryIfNeeded({
+    sessionKey,
+    hostedBoundSessionKey: getHostedBoundSessionKey(),
+    hostedSeeded: _hostedSeeded,
+    hostedSessionConfig: _hostedSessionConfig,
+    deduped,
+    toHostedSeedHistory,
+    trimHostedHistoryByTokens,
+    persistHostedRuntime,
+  })
 
   // 正在发送/流式输出时不全量重绘，避免覆盖本地乐观渲染
   if (hasExisting && (_isSending || _isStreaming || _messageQueue.length > 0)) {

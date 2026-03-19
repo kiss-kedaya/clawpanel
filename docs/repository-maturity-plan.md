@@ -121,6 +121,8 @@ scripts/
 10. `chat.js` 中 history 渲染主流程开始通过 render-service 复用，页面层进一步收口到状态编排与依赖注入。
 11. 新增 `src/lib/history-loader-service.js`，抽离 pending history flush 判定与本地历史回填逻辑。
 12. `flushPendingHistory(...)` 与 `loadHistory(...)` 开始复用 loader helper，页面层继续减少重复分支与本地回填细节。
+13. 新增 `src/lib/history-apply-service.js`，抽离 history apply 前的状态更新判断与 hosted seed 初始化逻辑。
+14. `applyHistoryResult(...)` 开始复用 apply-service，页面层继续从“状态更新 + 渲染执行”向“编排 + 注入依赖”收口。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
