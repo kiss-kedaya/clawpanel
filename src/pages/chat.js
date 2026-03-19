@@ -56,6 +56,12 @@ import {
   prepareHostedOutput,
 } from '../lib/hosted-output-service.js'
 import {
+  buildHostedState,
+  readHostedSessionData,
+  snapshotHostedGlobals,
+  writeHostedSessionConfig,
+} from '../lib/hosted-session-service.js'
+import {
   buildHistoryEntryKey,
   buildHistoryHash,
   extractHistoryMessages,
@@ -2637,36 +2643,17 @@ function getHostedBoundSessionKey() {
 }
 
 function saveHostedSessionConfigForKey(key, nextConfig) {
-  let data = {}
-  try { data = JSON.parse(localStorage.getItem(HOSTED_SESSIONS_KEY) || '{}') } catch { data = {} }
-  data[key] = nextConfig
-  localStorage.setItem(HOSTED_SESSIONS_KEY, JSON.stringify(data))
+  writeHostedSessionConfig(localStorage, HOSTED_SESSIONS_KEY, key, nextConfig)
 }
 
 function buildHostedStateFromStorage(key) {
-  let data = {}
-  try { data = JSON.parse(localStorage.getItem(HOSTED_SESSIONS_KEY) || '{}') } catch { data = {} }
-  const current = data[key] || {}
-  const config = { ...HOSTED_DEFAULTS, ..._hostedDefaults, ...current }
-  if (!config.boundSessionKey) config.boundSessionKey = key
-  if (!config.systemPrompt && config.prompt) config.systemPrompt = config.prompt
-  if (!config.prompt && config.systemPrompt) config.prompt = config.systemPrompt
-  if (!config.contextTokenLimit) config.contextTokenLimit = _hostedDefaults?.contextTokenLimit || HOSTED_DEFAULTS.contextTokenLimit
-  if (!config.state) config.state = { ...HOSTED_RUNTIME_DEFAULT }
-  if (!config.history) config.history = []
-  config.history = config.history.filter(m => m.role !== 'system')
-  const runtime = { ...HOSTED_RUNTIME_DEFAULT, ...config.state }
-  return {
+  const data = readHostedSessionData(localStorage, HOSTED_SESSIONS_KEY)
+  return buildHostedState({
     sessionKey: key,
-    config,
-    runtime,
-    seeded: config.history.length > 0,
-    busy: false,
-    lastTargetTs: 0,
-    lastTargetHash: '',
-    lastSentHash: '',
-    lastCompletionRunId: '',
-  }
+    storedConfig: data[key] || {},
+    hostedDefaults: { ...HOSTED_DEFAULTS, ..._hostedDefaults },
+    runtimeDefault: HOSTED_RUNTIME_DEFAULT,
+  })
 }
 
 function syncHostedGlobalsFromState(state) {
@@ -2692,7 +2679,7 @@ function syncHostedStateFromGlobals(state) {
 }
 
 function withHostedState(sessionKey, fn) {
-  const prev = {
+  const prev = snapshotHostedGlobals({
     config: _hostedSessionConfig,
     runtime: _hostedRuntime,
     seeded: _hostedSeeded,
@@ -2701,7 +2688,7 @@ function withHostedState(sessionKey, fn) {
     lastTargetHash: _hostedLastTargetHash,
     lastSentHash: _hostedLastSentHash,
     lastCompletionRunId: _hostedLastCompletionRunId,
-  }
+  })
   const key = sessionKey || getHostedSessionKey()
   const state = getHostedState(key)
   syncHostedGlobalsFromState(state)
@@ -2723,7 +2710,7 @@ function withHostedState(sessionKey, fn) {
 }
 
 async function withHostedStateAsync(sessionKey, fn) {
-  const prev = {
+  const prev = snapshotHostedGlobals({
     config: _hostedSessionConfig,
     runtime: _hostedRuntime,
     seeded: _hostedSeeded,
@@ -2732,7 +2719,7 @@ async function withHostedStateAsync(sessionKey, fn) {
     lastTargetHash: _hostedLastTargetHash,
     lastSentHash: _hostedLastSentHash,
     lastCompletionRunId: _hostedLastCompletionRunId,
-  }
+  })
   const key = sessionKey || getHostedSessionKey()
   const state = getHostedState(key)
   syncHostedGlobalsFromState(state)
