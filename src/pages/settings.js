@@ -312,6 +312,19 @@ function resolveExposePort(form) {
   return 18789
 }
 
+function validateCloudflaredForm(form) {
+  if (form.exposeTarget === 'custom' && !(Number(form.customPort) > 0)) {
+    return '自定义端口模式下必须填写有效端口'
+  }
+  if (form.mode === 'named' && !form.tunnelName) {
+    return '命名隧道模式下必须填写隧道名称'
+  }
+  if (form.mode === 'named' && !form.hostname) {
+    return '命名隧道模式下必须填写绑定域名'
+  }
+  return ''
+}
+
 function syncCloudflaredFormState(page) {
   const form = getCloudflaredForm(page)
   const modeBlocks = page.querySelectorAll('[data-cloudflared-mode-block]')
@@ -324,6 +337,20 @@ function syncCloudflaredFormState(page) {
   })
   const resolvedPortEl = page.querySelector('[data-cloudflared-resolved-port]')
   if (resolvedPortEl) resolvedPortEl.textContent = String(resolveExposePort(form))
+  const customPortInput = page.querySelector('[data-name="cloudflared-port"]')
+  if (customPortInput) customPortInput.disabled = form.exposeTarget !== 'custom'
+  const tunnelNameInput = page.querySelector('[data-name="cloudflared-tunnel"]')
+  const hostnameInput = page.querySelector('[data-name="cloudflared-hostname"]')
+  if (tunnelNameInput) tunnelNameInput.disabled = form.mode !== 'named'
+  if (hostnameInput) hostnameInput.disabled = form.mode !== 'named'
+  const validationEl = page.querySelector('[data-cloudflared-validation]')
+  const errorText = validateCloudflaredForm(form)
+  if (validationEl) {
+    validationEl.textContent = errorText || '当前配置可直接保存；启动前会按你的选择自动计算实际端口。'
+    validationEl.style.color = errorText ? 'var(--warning)' : 'var(--text-tertiary)'
+  }
+  const startBtn = page.querySelector('[data-action="cloudflared-start"]')
+  if (startBtn) startBtn.disabled = !!errorText
 }
 
 async function loadCloudflared(page) {
@@ -474,6 +501,12 @@ async function handleCloudflaredLogin(page) {
 
 async function handleCloudflaredStart(page) {
   const form = getCloudflaredForm(page)
+  const validationError = validateCloudflaredForm(form)
+  if (validationError) {
+    syncCloudflaredFormState(page)
+    toast(validationError, 'warning')
+    return
+  }
   const port = resolveExposePort(form)
   await handleCloudflaredSave(page)
   await api.cloudflaredStart({

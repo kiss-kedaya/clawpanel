@@ -179,6 +179,8 @@ scripts/
 68. 公网访问分层表单主入口已确认在 `src/pages/settings.js` 的 `cloudflared` 区块；下一轮将围绕 `loadCloudflared(...)` / `handleCloudflaredStart(...)` 做表单分层与说明收口。
 69. `src/pages/settings.js` 的 Cloudflared 公网访问表单已改为四层结构：状态卡、启动操作、暴露目标、隧道模式；保持原启动参数不变，只重构展示与交互层。
 70. 新增 `syncCloudflaredFormState(...)`：切换 `cloudflared-mode` / `cloudflared-expose` / `cloudflared-port` 时，动态切换对应表单块可见性并实时更新实际端口展示。
+71. Cloudflared 表单继续收紧交互边界：新增 `validateCloudflaredForm(...)`，命名隧道缺少隧道名/域名、自定义端口为空时禁止启动，并通过提示文案与按钮禁用态即时反馈。
+72. `syncCloudflaredFormState(...)` 现同时负责输入禁用态：非自定义目标时禁用端口输入，非命名隧道时禁用隧道名/域名输入，降低误填和误启概率。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
