@@ -31,6 +31,19 @@ import {
   saveAssistantConfig,
   serializeAssistantSessions,
 } from '../lib/assistant-session-store.js'
+import {
+  ensureAssistantRequestState,
+  getAssistantAbortController,
+  getAssistantQueue,
+  getAssistantRequestId,
+  getAssistantStreaming,
+  isAssistantActiveRequest,
+  nextAssistantRequestId,
+  patchAssistantRequestState,
+  setAssistantAbortController,
+  setAssistantQueue,
+  setAssistantStreaming,
+} from '../lib/assistant-request-state.js'
 import { renderAssistantSettingsModal, renderAssistantKnowledgeList, updateAssistantTitleFromSettings } from './assistant-settings.js'
 
 // ── 常量 ──
@@ -978,17 +991,7 @@ function throttledSave() {
 }
 
 function ensureRequestState(sessionId) {
-  if (!sessionId) return null
-  if (!_requestStateBySession.has(sessionId)) {
-    _requestStateBySession.set(sessionId, {
-      streaming: false,
-      abortController: null,
-      status: 'idle',
-      queue: [],
-      requestId: 0,
-    })
-  }
-  return _requestStateBySession.get(sessionId)
+  return ensureAssistantRequestState(_requestStateBySession, sessionId)
 }
 
 function getRequestState(sessionId) {
@@ -996,44 +999,35 @@ function getRequestState(sessionId) {
 }
 
 function patchRequestState(sessionId, patch = {}) {
-  const state = ensureRequestState(sessionId)
-  if (!state) return null
-  Object.assign(state, patch)
-  return state
+  return patchAssistantRequestState(_requestStateBySession, sessionId, patch)
 }
 
 function getStreaming(sessionId) {
-  return getRequestState(sessionId)?.streaming === true
+  return getAssistantStreaming(_requestStateBySession, sessionId)
 }
 
 function setStreaming(sessionId, value) {
-  if (!sessionId) return
-  patchRequestState(sessionId, { streaming: value === true })
+  setAssistantStreaming(_requestStateBySession, sessionId, value)
 }
 
 function getAbortController(sessionId) {
-  return getRequestState(sessionId)?.abortController || null
+  return getAssistantAbortController(_requestStateBySession, sessionId)
 }
 
 function setAbortController(sessionId, controller) {
-  if (!sessionId) return
-  patchRequestState(sessionId, { abortController: controller || null })
+  setAssistantAbortController(_requestStateBySession, sessionId, controller)
 }
 
 function nextRequestId(sessionId) {
-  const state = ensureRequestState(sessionId)
-  if (!state) return 0
-  state.requestId = (state.requestId || 0) + 1
-  return state.requestId
+  return nextAssistantRequestId(_requestStateBySession, sessionId)
 }
 
 function getRequestId(sessionId) {
-  return getRequestState(sessionId)?.requestId || 0
+  return getAssistantRequestId(_requestStateBySession, sessionId)
 }
 
 function isActiveRequest(sessionId, requestId) {
-  const state = getRequestState(sessionId)
-  return !!state && state.requestId === requestId
+  return isAssistantActiveRequest(_requestStateBySession, sessionId, requestId)
 }
 
 function clearRequestState(sessionId, { keepStatus = false, requestId = null } = {}) {
@@ -1053,12 +1047,11 @@ function clearRequestState(sessionId, { keepStatus = false, requestId = null } =
 }
 
 function getQueue(sessionId) {
-  return getRequestState(sessionId)?.queue || []
+  return getAssistantQueue(_requestStateBySession, sessionId)
 }
 
 function setQueue(sessionId, queue) {
-  if (!sessionId) return
-  patchRequestState(sessionId, { queue: Array.isArray(queue) ? queue : [] })
+  setAssistantQueue(_requestStateBySession, sessionId, queue)
 }
 
 function flushSave() {

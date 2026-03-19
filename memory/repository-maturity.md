@@ -40,6 +40,8 @@
 - `assistant.js` 开始复用 assistant API client helper，assistant 页与 API client 基础细节开始解耦。
 - 新增 `src/lib/assistant-session-store.js`，抽离 assistant 配置读写、session 存储读写、序列化裁剪、会话创建与自动标题规则。
 - `assistant.js` 开始复用 assistant session store helper，assistant 页与 config/session store 基础逻辑开始解耦。
+- 新增 `src/lib/assistant-request-state.js`，抽离 assistant 请求生命周期状态、abort controller、queue 与 requestId 管理。
+- `assistant.js` 开始复用 assistant request state helper，assistant 运行态管理开始从页面层剥离。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。
