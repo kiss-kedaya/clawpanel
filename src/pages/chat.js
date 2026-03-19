@@ -145,7 +145,7 @@ let _sendBtn = null, _statusDot = null, _typingEl = null, _scrollBtn = null
 let _sessionListEl = null, _cmdPanelEl = null, _attachPreviewEl = null, _fileInputEl = null, _attachBtnEl = null
 let _modelSelectEl = null
 let _hostedBtn = null, _hostedPanelEl = null, _hostedBadgeEl = null
-let _hostedPromptEl = null, _hostedEnableEl = null, _hostedMaxStepsEl = null, _hostedContextLimitEl = null
+let _hostedPromptEl = null, _hostedMaxStepsEl = null, _hostedContextLimitEl = null
 let _hostedSaveBtn = null, _hostedPauseBtn = null, _hostedStopBtn = null, _hostedCloseBtn = null
 let _hostedGlobalSyncEl = null
 let _hostedDefaults = null
@@ -334,11 +334,6 @@ export async function render() {
             <textarea class="form-input hosted-agent-prompt" id="hosted-agent-prompt" rows="3" placeholder="请输入托管 Agent 的初始提示词..." ></textarea>
             <div class="form-hint">托管 Agent 仅基于该提示词 + 对面回复自动生成下一步指令</div>
           </div>
-          <label class="hosted-agent-switch">
-            <span>启用托管 Agent</span>
-            <input type="checkbox" id="hosted-agent-enabled">
-            <span class="hosted-agent-track"></span>
-          </label>
           <div class="hosted-agent-row">
             <div class="hosted-agent-tag">运行模式</div>
             <div class="hosted-agent-value">对面回复后自动继续</div>
@@ -366,7 +361,7 @@ export async function render() {
             <span class="hosted-agent-track"></span>
           </label>
           <div class="hosted-agent-actions">
-            <button class="btn btn-primary btn-sm" id="hosted-agent-save">保存并启用</button>
+            <button class="btn btn-primary btn-sm" id="hosted-agent-save">启动托管</button>
             <button class="btn btn-secondary btn-sm" id="hosted-agent-pause">暂停</button>
             <button class="btn btn-ghost btn-sm" id="hosted-agent-stop">立即停止</button>
           </div>
@@ -408,7 +403,6 @@ export async function render() {
   _hostedBadgeEl = page.querySelector('#chat-hosted-badge')
   _hostedPanelEl = page.querySelector('#hosted-agent-panel')
   _hostedPromptEl = page.querySelector('#hosted-agent-prompt')
-  _hostedEnableEl = page.querySelector('#hosted-agent-enabled')
   _hostedMaxStepsEl = page.querySelector('#hosted-agent-max-steps')
   _hostedContextLimitEl = page.querySelector('#hosted-agent-context-limit')
   _hostedSaveBtn = page.querySelector('#hosted-agent-save')
@@ -2921,7 +2915,7 @@ function renderHostedPanel() {
 async function saveHostedConfig() {
   if (!_hostedSessionConfig) return
   const prompt = (_hostedPromptEl?.value || '').trim()
-  const enabled = !!_hostedEnableEl?.checked
+  const enabled = true
   const maxSteps = Math.max(1, parseInt(_hostedMaxStepsEl?.value || HOSTED_DEFAULTS.maxSteps, 10))
   const contextTokenLimit = Math.max(1000, parseInt(_hostedContextLimitEl?.value || HOSTED_DEFAULTS.contextTokenLimit, 10))
   const stepDelayMs = _hostedSessionConfig.stepDelayMs ?? HOSTED_DEFAULTS.stepDelayMs
@@ -3762,7 +3756,6 @@ export function cleanup() {
   _hostedPanelEl = null
   _hostedBadgeEl = null
   _hostedPromptEl = null
-  _hostedEnableEl = null
   _hostedMaxStepsEl = null
   _hostedContextLimitEl = null
   _hostedSaveBtn = null

@@ -146,6 +146,14 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  position: relative;
+  z-index: 12;
+}
+
+#ast-btn-settings {
+  position: relative;
+  z-index: 20;
+  pointer-events: auto;
 }
 
 .ast-toggle-sidebar {

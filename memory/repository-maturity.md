@@ -88,6 +88,8 @@
 - Dashboard 的 Skills 卡片文案已与 Skills 页总览口径对齐：从“可用 / 缺依赖”升级为“可用 / 待处理 / 已禁用”，减少跨页理解落差。
 - 已开始保守式 upstream 同步：选择性吸收 `upstream/main` 的 `8485df7`（`src-tauri/src/commands/config.rs` clippy 清理），冲突后保留本地行为并仅手动吸收 `.flatten()` 迭代简化，避免整包 merge 冲乱当前分支大规模前端重构。
 - 已拆解 `7764a32` 并只吸收低风险高价值块：`src/lib/tauri-api.js` 中配置保存后的 3 秒防抖 Gateway 重载，以及 `src/lib/markdown.js` 中图片加载失败提示的反斜杠安全转义；`chat.js` / hosted / 样式重排等高风险块明确暂不手抄。
+- 用户二次验收后发现 3 个前端漏点仍存在：assistant 设置按钮点击可达性不足、Hosted 面板仍残留“启用托管 Agent”开关语义、全局原生 select 样式未完全统一；已按实际源码补修，不再依赖先前口头判断。
+- 后续 UI 修复结论必须以“可见 markup + 事件绑定 + 最终共享样式路径”三处源码都核对通过为准，避免再次出现“逻辑已改但用户仍可见旧控件/旧样式”的误判。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

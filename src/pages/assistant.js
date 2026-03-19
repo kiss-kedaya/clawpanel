@@ -3067,7 +3067,7 @@ export async function render() {
             <div class="ast-mode-slider" id="ast-mode-slider"></div>
             ${Object.entries(MODES).map(([key, m]) => `<button class="ast-mode-btn ${currentMode() === key ? 'active' : ''}" data-mode="${key}" title="${m.desc}">${MODE_ICONS[key]} ${m.label}</button>`).join('')}
           </div>
-          <button class="btn btn-sm btn-ghost" id="ast-btn-settings" title="助手设置" style="position:relative;z-index:3">
+          <button class="btn btn-sm btn-ghost" id="ast-btn-settings" type="button" title="助手设置" style="position:relative;z-index:20;pointer-events:auto">
             ${icon('settings', 16)}
             设置
           </button>

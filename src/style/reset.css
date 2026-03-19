@@ -44,11 +44,14 @@ input, textarea, select {
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 
-select {
+select,
+select.form-input {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
   padding-right: 40px;
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
   background-image:
     linear-gradient(45deg, transparent 50%, color-mix(in srgb, var(--text-tertiary) 85%, white 15%) 50%),
     linear-gradient(135deg, color-mix(in srgb, var(--text-tertiary) 85%, white 15%) 50%, transparent 50%),
@@ -62,9 +65,17 @@ select {
   cursor: pointer;
 }
 
-select:hover {
+select:hover,
+select.form-input:hover {
   background-color: color-mix(in srgb, var(--bg-tertiary) 88%, white 12%);
   border-color: color-mix(in srgb, var(--border-focus) 60%, var(--border-primary) 40%);
+}
+
+select option,
+select.form-input option,
+optgroup {
+  color: var(--text-primary);
+  background: var(--bg-elevated, #111827);
 }
 
 input:focus, textarea:focus, select:focus {
