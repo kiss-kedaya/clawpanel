@@ -84,6 +84,7 @@
 - `loadCloudflared(...)` 现将安装状态挂到页面上下文，`syncCloudflaredFormState(...)` 统一处理安装态 + 校验态双重禁用逻辑，避免未安装时触发假动作。
 - Skills 页已增加顶部统计卡：将总数、可用、待处理、已禁用四类状态前置，减少用户必须逐段滚动才能理解当前技能态势的成本。
 - Skills 过滤交互已补空态：输入过滤关键字后若无任何匹配项，显示独立空态提示而非留白。
+- Cloudflared 状态卡已继续前置安装信息：将“安装状态”从按钮语义中抽离成独立状态卡，并让登录 / 启动的未安装兜底同时保留在按钮逻辑层。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

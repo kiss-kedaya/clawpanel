@@ -364,6 +364,7 @@ async function loadCloudflared(page) {
   }
   const saved = cfg.cloudflared || {}
   const status = await api.cloudflaredGetStatus().catch(() => ({ installed: false, running: false }))
+  page.__cloudflaredInstalled = !!status.installed
 
   const mode = saved.mode || 'quick'
   const exposeTarget = saved.exposeTarget || 'gateway'
@@ -506,6 +507,11 @@ async function handleCloudflaredLogin(page) {
 
 async function handleCloudflaredStart(page) {
   const form = getCloudflaredForm(page)
+  if (page.__cloudflaredInstalled === false) {
+    syncCloudflaredFormState(page)
+    toast('请先安装 Cloudflared', 'warning')
+    return
+  }
   const validationError = validateCloudflaredForm(form)
   if (validationError) {
     syncCloudflaredFormState(page)
