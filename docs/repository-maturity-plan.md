@@ -171,6 +171,9 @@ scripts/
 60. Hosted 错投链路继续修正：`createAskUserBubble(...)` 与 `commitHostedUserReply(...)` 默认优先使用 `getHostedBoundSessionKey()`，且非当前 UI 会话时不再把 optimistic 用户消息误插入当前会话 DOM。
 61. `src/lib/hosted-agent.js` 的固定提示词模板已按用户提供版本替换为变量化 Role/Profile/Variables/Skills/Rules 结构，保留简洁执行导向并支持默认值回退语义。
 62. Hosted Prompt 模板继续补完用户提供的 `Workflows` 与 `Initialization` 片段，固定四段输出结构与最小充分表达原则已一并写入模板主体。
+63. 新增 `src/lib/skills-catalog.js` 作为 Skills 数据轻量缓存层，统一负责 `skillsList` 结果缓存、TTL、失效与摘要统计，减少 Dashboard / Skills 重复加载成本。
+64. Dashboard 总览卡把 `MCP 工具` 正式切换为 `Skills`，显示真实 Skills 总数与可用/缺依赖摘要，不再读取 `readMcpConfig()` 作为该卡来源。
+65. `src/pages/skills.js` 开始复用 skills catalog cache：优先渲染缓存结果、后台刷新；安装依赖 / 安装 Skill / 卸载 / 手动刷新时统一失效缓存并强制重载，提升打开速度并修正统计摘要包含 blocked 数量。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
