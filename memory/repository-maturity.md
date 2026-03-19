@@ -42,6 +42,8 @@
 - `assistant.js` 开始复用 assistant session store helper，assistant 页与 config/session store 基础逻辑开始解耦。
 - 新增 `src/lib/assistant-request-state.js`，抽离 assistant 请求生命周期状态、abort controller、queue 与 requestId 管理。
 - `assistant.js` 开始复用 assistant request state helper，assistant 运行态管理开始从页面层剥离。
+- 新增 `src/lib/assistant-attachments.js`，抽离 assistant 附件记录构造、preview HTML、pendingImages 增删清空与多模态消息 content 拼装。
+- `assistant.js` 开始复用 assistant attachments helper，assistant 输入区附件逻辑开始从页面层剥离。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

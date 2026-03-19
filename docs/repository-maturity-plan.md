@@ -143,6 +143,8 @@ scripts/
 32. `assistant.js` 开始复用 assistant session store helper，页面层继续从 config/session 存储细节中收口。
 33. 新增 `src/lib/assistant-request-state.js`，抽离 assistant 请求生命周期状态、abort controller、queue 与 requestId 管理。
 34. `assistant.js` 开始复用 assistant request state helper，流式请求与队列运行态开始从页面文件中剥离。
+35. 新增 `src/lib/assistant-attachments.js`，抽离 assistant 附件记录构造、preview HTML、pendingImages 增删清空与多模态消息 content 拼装。
+36. `assistant.js` 开始复用 assistant attachments helper，输入区附件逻辑开始从页面文件中收口。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。

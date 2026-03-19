@@ -44,6 +44,13 @@ import {
   setAssistantQueue,
   setAssistantStreaming,
 } from '../lib/assistant-request-state.js'
+import {
+  buildAssistantImagePreviewHtml,
+  buildAssistantMessageContent,
+  clearAssistantPendingImages,
+  createAssistantPendingImage,
+  removeAssistantPendingImage,
+} from '../lib/assistant-attachments.js'
 import { renderAssistantSettingsModal, renderAssistantKnowledgeList, updateAssistantTitleFromSettings } from './assistant-settings.js'
 
 // ── 常量 ──
@@ -1177,12 +1184,12 @@ function addImageFromFile(file) {
       ctx.drawImage(img, 0, 0, width, height)
       // JPEG 压缩到合理大小
       const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
-      _pendingImages.push({
-        id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+      _pendingImages.push(createAssistantPendingImage({
         dataUrl,
         name: file.name || 'image.jpg',
-        width, height,
-      })
+        width,
+        height,
+      }))
       renderImagePreview()
     }
     img.src = e.target.result
@@ -1196,7 +1203,7 @@ function addImageFromClipboard(item) {
 }
 
 function removeImage(id) {
-  _pendingImages = _pendingImages.filter(img => img.id !== id)
+  _pendingImages = removeAssistantPendingImage(_pendingImages, id)
   renderImagePreview()
 }
 
@@ -1210,31 +1217,17 @@ function renderImagePreview() {
   }
   container.style.display = 'flex'
   const delSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
-  container.innerHTML = _pendingImages.map(img => `
-    <div class="ast-img-thumb" data-img-id="${img.id}">
-      <img src="${img.dataUrl}" alt="${escHtml(img.name)}"/>
-      <button class="ast-img-thumb-del" data-img-del="${img.id}" title="移除">${delSvg}</button>
-    </div>
-  `).join('')
+  container.innerHTML = buildAssistantImagePreviewHtml(_pendingImages, escHtml, delSvg)
 }
 
 function clearPendingImages() {
-  _pendingImages = []
+  _pendingImages = clearAssistantPendingImages()
   renderImagePreview()
 }
 
 // 构建多模态消息 content
 function buildMessageContent(text, images) {
-  if (!images || images.length === 0) return text
-  const parts = []
-  if (text) parts.push({ type: 'text', text })
-  for (const img of images) {
-    parts.push({
-      type: 'image_url',
-      image_url: { url: img.dataUrl, detail: 'auto' },
-    })
-  }
-  return parts
+  return buildAssistantMessageContent(text, images)
 }
 
 // ── 会话状态管理 ──
