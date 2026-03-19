@@ -22,6 +22,8 @@
 - `flushPendingHistory(...)` 与 `loadHistory(...)` 开始复用 loader helper，history loader 路径继续从页面层剥离。
 - 新增 `src/lib/history-apply-service.js`，抽离 history apply 前的 state 更新、hash 判重与 hosted seed 初始化。
 - `applyHistoryResult(...)` 开始复用 apply-service，history apply 路径继续摆脱页面内联状态判断。
+- 新增 `src/lib/hosted-runtime-service.js`，抽离 hosted runtime 的断线暂停、重连恢复、目标哈希与自动触发前状态切换。
+- `pauseHostedForDisconnect(...)`、`resumeHostedFromReconnect(...)`、`maybeTriggerHostedRun(...)` 开始复用 hosted runtime helper，hosted 状态机从页面层继续剥离。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

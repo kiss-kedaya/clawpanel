@@ -27,6 +27,14 @@ import {
   renderHostedTemplate,
 } from '../lib/hosted-agent.js'
 import {
+  applyHostedDisconnectedPause,
+  buildHostedTargetHash,
+  prepareHostedRunTrigger,
+  resumeHostedAfterReconnect,
+  shouldAutoTriggerHostedRun,
+  shouldPauseHostedForDisconnect,
+} from '../lib/hosted-runtime-service.js'
+import {
   buildHistoryEntryKey,
   buildHistoryHash,
   extractHistoryMessages,
@@ -180,17 +188,12 @@ function clearHostedDisconnectTimer() {
 }
 
 function pauseHostedForDisconnect(reason = 'disconnected') {
-  if (!_hostedSessionConfig?.enabled) return
-  const active = _hostedRuntime.status === HOSTED_STATUS.RUNNING || _hostedRuntime.status === HOSTED_STATUS.WAITING
-  const alreadyDisconnectedPause = _hostedRuntime.status === HOSTED_STATUS.PAUSED && _hostedRuntime.lastAction === 'disconnected'
-  if (!active && !alreadyDisconnectedPause) return
+  if (!shouldPauseHostedForDisconnect(_hostedSessionConfig, _hostedRuntime)) return
   clearHostedDisconnectTimer()
   _hostedDisconnectTimer = setTimeout(() => {
     _hostedDisconnectTimer = null
     if (!wsClient.gatewayReady && _hostedSessionConfig?.enabled) {
-      _hostedRuntime.status = HOSTED_STATUS.PAUSED
-      _hostedRuntime.pending = false
-      _hostedRuntime.lastAction = 'disconnected'
+      applyHostedDisconnectedPause(_hostedRuntime)
       persistHostedRuntime()
       updateHostedBadge()
       markHostedHistoryStale()
@@ -201,10 +204,8 @@ function pauseHostedForDisconnect(reason = 'disconnected') {
 
 function resumeHostedFromReconnect() {
   clearHostedDisconnectTimer()
-  if (!_hostedSessionConfig?.enabled) return
-  if (_hostedRuntime.status === HOSTED_STATUS.PAUSED && _hostedRuntime.lastAction === 'disconnected') {
-    _hostedRuntime.status = HOSTED_STATUS.IDLE
-    _hostedRuntime.lastAction = ''
+  const resumed = resumeHostedAfterReconnect(_hostedSessionConfig, _hostedRuntime)
+  if (resumed) {
     persistHostedRuntime()
     updateHostedBadge()
     refreshHostedHistoryIfNeeded({ limit: 100, force: true })
@@ -3017,12 +3018,6 @@ function stopHostedAgent() {
   toast('托管 Agent 已停止', 'info')
 }
 
-function buildHostedTargetHash(text, ts = Date.now()) {
-  const normalizedText = String(text || '').trim()
-  const normalizedTs = Number(ts || Date.now())
-  return `${normalizedTs}:${normalizedText.length}:${normalizedText.slice(0, 240)}`
-}
-
 function shouldCaptureHostedTarget(payload) {
   if (!_hostedSessionConfig?.enabled) return false
   const boundKey = getHostedBoundSessionKey()
@@ -3044,22 +3039,16 @@ function appendHostedTarget(text, ts) {
 }
 
 function maybeTriggerHostedRun() {
-  if (!_hostedSessionConfig) return
-  if (!_hostedSessionConfig.enabled) return
-  if (!_hostedSessionConfig.autoRunAfterTarget) return
-  if (_hostedRuntime.pending || _hostedRuntime.status === HOSTED_STATUS.RUNNING) return
-  if (_hostedRuntime.status === HOSTED_STATUS.PAUSED || _hostedRuntime.status === HOSTED_STATUS.ERROR) return
-  if (!wsClient.gatewayReady) {
-    _hostedRuntime.status = HOSTED_STATUS.PAUSED
-    persistHostedRuntime()
-    updateHostedBadge()
-    updateHostedInputLock()
+  if (!shouldAutoTriggerHostedRun(_hostedSessionConfig, _hostedRuntime)) return
+  const action = prepareHostedRunTrigger(_hostedRuntime, wsClient.gatewayReady)
+  if (!action.run) {
+    if (action.needsPersist) {
+      persistHostedRuntime()
+      updateHostedBadge()
+      updateHostedInputLock()
+    }
     return
   }
-  if (_hostedRuntime.status === HOSTED_STATUS.WAITING) {
-    _hostedRuntime.status = HOSTED_STATUS.IDLE
-  }
-  _hostedRuntime.lastAction = ''
   runHostedAgentStepForSession(getHostedBoundSessionKey())
 }
 

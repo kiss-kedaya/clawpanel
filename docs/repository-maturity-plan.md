@@ -123,6 +123,8 @@ scripts/
 12. `flushPendingHistory(...)` 与 `loadHistory(...)` 开始复用 loader helper，页面层继续减少重复分支与本地回填细节。
 13. 新增 `src/lib/history-apply-service.js`，抽离 history apply 前的状态更新判断与 hosted seed 初始化逻辑。
 14. `applyHistoryResult(...)` 开始复用 apply-service，页面层继续从“状态更新 + 渲染执行”向“编排 + 注入依赖”收口。
+15. 新增 `src/lib/hosted-runtime-service.js`，抽离 hosted runtime 的断线暂停、重连恢复、目标哈希与自动触发前状态切换规则。
+16. `pauseHostedForDisconnect(...)`、`resumeHostedFromReconnect(...)`、`maybeTriggerHostedRun(...)` 开始复用 hosted runtime helper，chat 页面内联状态机噪音继续下降。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
