@@ -33,6 +33,14 @@ import {
   maxHistoryTimestamp,
   normalizeHistoryPayload,
 } from '../lib/history-domain.js'
+import {
+  HISTORY_OMITTED_IMAGES_NOTICE,
+  hasRenderableHistoryMessage,
+  toHostedSeedHistory,
+  toLocalAssistantImages,
+  toStoredHistoryMessages,
+  toUserHistoryAttachments,
+} from '../lib/history-view-model.js'
 
 const RENDER_THROTTLE = 30
 const STORAGE_SESSION_KEY = 'clawpanel-last-session'
@@ -1796,11 +1804,7 @@ function applyIncrementalHistoryResult(result, sessionKey) {
     const msgTime = msg.timestamp ? new Date(msg.timestamp) : new Date()
     let wrap = null
     if (msg.role === 'user') {
-      const userAtts = msg.images?.length ? msg.images.map(i => ({
-        mimeType: i.mediaType || i.media_type || 'image/png',
-        content: i.data || i.source?.data || '',
-        category: 'image',
-      })).filter(a => a.content) : []
+      const userAtts = toUserHistoryAttachments(msg)
       if (msg.images?.length && !userAtts.length) hasOmittedImages = true
       wrap = appendUserMessage(msg.text, userAtts, msgTime)
     } else if (msg.role === 'assistant') {
@@ -1814,15 +1818,11 @@ function applyIncrementalHistoryResult(result, sessionKey) {
   })
 
   if (hasOmittedImages) {
-    const notice = appendSystemMessage('部分历史图片无法显示（Gateway 不保留图片原始数据，仅当前会话内可见）')
+    const notice = appendSystemMessage(HISTORY_OMITTED_IMAGES_NOTICE)
     if (notice) notice.dataset.historyKey = 'system:omitted-images'
   }
 
-  saveMessages(result.messages.map(m => {
-    const c = extractContent(m, sessionKey)
-    const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
-    return { id: m.id || uuid(), sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
-  }))
+  saveMessages(toStoredHistoryMessages(result.messages, sessionKey, extractContent, uuid))
 
   if (appended > 0) scrollToBottom()
 }
@@ -1840,15 +1840,7 @@ function applyHistoryResult(result, hasExisting, sessionKey) {
   state.lastHistoryHash = hash
 
   if (sessionKey === getHostedBoundSessionKey() && !_hostedSeeded && _hostedSessionConfig && (!_hostedSessionConfig.history || _hostedSessionConfig.history.length === 0)) {
-    const seeded = deduped
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .slice(-200)
-      .map(m => ({
-        role: m.role,
-        content: m.text || '',
-        ts: m.timestamp || Date.now(),
-      }))
-      .filter(m => m.content)
+    const seeded = toHostedSeedHistory(deduped)
     if (seeded.length) {
       _hostedSessionConfig.history = seeded
       trimHostedHistoryByTokens()
@@ -1859,26 +1851,18 @@ function applyHistoryResult(result, hasExisting, sessionKey) {
 
   // 正在发送/流式输出时不全量重绘，避免覆盖本地乐观渲染
   if (hasExisting && (_isSending || _isStreaming || _messageQueue.length > 0)) {
-    saveMessages(result.messages.map(m => {
-      const c = extractContent(m, sessionKey)
-      const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
-      return { id: m.id || uuid(), sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
-    }))
+    saveMessages(toStoredHistoryMessages(result.messages, sessionKey, extractContent, uuid))
     return
   }
 
   clearMessages()
   let hasOmittedImages = false
   deduped.forEach(msg => {
-    if (!msg.text && !msg.images?.length && !msg.videos?.length && !msg.audios?.length && !msg.files?.length && !msg.tools?.length) return
+    if (!hasRenderableHistoryMessage(msg)) return
     const msgTime = msg.timestamp ? new Date(msg.timestamp) : new Date()
     let wrap = null
     if (msg.role === 'user') {
-      const userAtts = msg.images?.length ? msg.images.map(i => ({
-        mimeType: i.mediaType || i.media_type || 'image/png',
-        content: i.data || i.source?.data || '',
-        category: 'image',
-      })).filter(a => a.content) : []
+      const userAtts = toUserHistoryAttachments(msg)
       if (msg.images?.length && !userAtts.length) hasOmittedImages = true
       wrap = appendUserMessage(msg.text, userAtts, msgTime)
     } else if (msg.role === 'assistant') {
@@ -1891,14 +1875,10 @@ function applyHistoryResult(result, hasExisting, sessionKey) {
     stampHistoryNode(wrap, msg)
   })
   if (hasOmittedImages) {
-    const notice = appendSystemMessage('部分历史图片无法显示（Gateway 不保留图片原始数据，仅当前会话内可见）')
+    const notice = appendSystemMessage(HISTORY_OMITTED_IMAGES_NOTICE)
     if (notice) notice.dataset.historyKey = 'system:omitted-images'
   }
-  saveMessages(result.messages.map(m => {
-    const c = extractContent(m, sessionKey)
-    const role = (m.role === 'tool' || m.role === 'toolResult') ? 'assistant' : m.role
-    return { id: m.id || uuid(), sessionKey, role, content: c?.text || '', timestamp: m.timestamp || Date.now() }
-  }))
+  saveMessages(toStoredHistoryMessages(result.messages, sessionKey, extractContent, uuid))
   scrollToBottom(true)
 }
 
@@ -1915,7 +1895,7 @@ async function loadHistory() {
         const msgTime = msg.timestamp ? new Date(msg.timestamp) : new Date()
         if (msg.role === 'user') appendUserMessage(msg.content || '', msg.attachments || null, msgTime)
         else if (msg.role === 'assistant') {
-          const images = (msg.attachments || []).filter(a => a.category === 'image').map(a => ({ mediaType: a.mimeType, data: a.content, url: a.url }))
+          const images = toLocalAssistantImages(msg.attachments || [])
           appendAiMessage(msg.content || '', msgTime, images, [], [], [], [])
         } else if (msg.role === 'system') {
           appendSystemMessage(msg.content || '', msgTime?.getTime?.() || Date.now())

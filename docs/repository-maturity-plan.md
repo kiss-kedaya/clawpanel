@@ -115,6 +115,8 @@ scripts/
 4. 统一 hosted 状态展示与系统反馈文案。
 5. 新增 `src/lib/history-domain.js`，抽离 history payload 归一化、history hash、entry key、最大时间戳计算等纯规则。
 6. `src/pages/chat.js` 开始消费 history-domain 模块，页面层继续向“渲染与编排”收口。
+7. 新增 `src/lib/history-view-model.js`，统一 history 到 UI 的附件、持久化、hosted seed 等视图转换规则。
+8. `applyHistoryResult(...)`、`applyIncrementalHistoryResult(...)` 与本地历史回填路径开始复用同一批 history view-model helper，减少页面内重复转换逻辑。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
