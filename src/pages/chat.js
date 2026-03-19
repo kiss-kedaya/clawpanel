@@ -35,6 +35,13 @@ import {
   shouldPauseHostedForDisconnect,
 } from '../lib/hosted-runtime-service.js'
 import {
+  buildHostedMessages as buildHostedMessagesCore,
+  buildSeededHostedHistory,
+  normalizeHostedRole,
+  pushHostedHistoryEntry as pushHostedHistoryEntryCore,
+  shouldCaptureHostedTarget as shouldCaptureHostedTargetCore,
+} from '../lib/hosted-history-service.js'
+import {
   buildHistoryEntryKey,
   buildHistoryHash,
   extractHistoryMessages,
@@ -3019,18 +3026,17 @@ function stopHostedAgent() {
 }
 
 function shouldCaptureHostedTarget(payload) {
-  if (!_hostedSessionConfig?.enabled) return false
-  const boundKey = getHostedBoundSessionKey()
-  if (payload?.sessionKey && boundKey && payload.sessionKey !== boundKey) return false
-  if (_hostedRuntime.status === HOSTED_STATUS.PAUSED || _hostedRuntime.status === HOSTED_STATUS.ERROR) return false
-  if (payload?.message?.role && payload.message.role !== 'assistant') return false
-  const text = String(extractChatContent(payload.message, payload.sessionKey || boundKey)?.text || '').trim()
-  if (!text) return false
-  const ts = Number(payload?.timestamp || Date.now())
-  const hash = buildHostedTargetHash(text, ts)
-  if (hash === _hostedLastTargetHash) return false
-  _hostedLastTargetTs = ts
-  _hostedLastTargetHash = hash
+  const result = shouldCaptureHostedTargetCore(payload, {
+    hostedSessionConfig: _hostedSessionConfig,
+    hostedRuntime: _hostedRuntime,
+    boundSessionKey: getHostedBoundSessionKey(),
+    extractChatContent,
+    buildHostedTargetHash,
+    lastTargetHash: _hostedLastTargetHash,
+  })
+  if (!result.capture) return false
+  _hostedLastTargetTs = result.ts
+  _hostedLastTargetHash = result.hash
   return true
 }
 
@@ -3052,54 +3058,23 @@ function maybeTriggerHostedRun() {
   runHostedAgentStepForSession(getHostedBoundSessionKey())
 }
 
-function normalizeHostedRole(role) {
-  if (role === 'assistant' || role === 'user') return role
-  if (role === 'developer') return 'assistant'
-  return 'user'
-}
-
 function pushHostedHistoryEntry(role, content, ts = Date.now(), options = {}) {
   if (!_hostedSessionConfig) return false
-  const normalizedRole = role || 'assistant'
-  const normalizedContent = String(content || '').trim()
-  if (!normalizedContent) return false
   if (!_hostedSessionConfig.history) _hostedSessionConfig.history = []
-  const nextTs = Number(ts || Date.now())
-  const last = _hostedSessionConfig.history[_hostedSessionConfig.history.length - 1]
-  const allowReplace = options.allowReplaceTail !== false
-  if (allowReplace && last?.role === normalizedRole && String(last.content || '').trim() === normalizedContent) {
-    if (!last.ts || nextTs >= Number(last.ts || 0)) last.ts = nextTs
-    trimHostedHistoryByTokens()
-    if (options.persist !== false) persistHostedRuntime(options.sessionKey)
-    return false
-  }
-  _hostedSessionConfig.history.push({ role: normalizedRole, content: normalizedContent, ts: nextTs })
+  const result = pushHostedHistoryEntryCore(_hostedSessionConfig.history, role, content, ts, options)
+  _hostedSessionConfig.history = result.history
   trimHostedHistoryByTokens()
   if (options.persist !== false) persistHostedRuntime(options.sessionKey)
-  return true
+  return result.changed
 }
 
 function buildHostedMessages() {
   trimHostedHistoryByTokens()
-  const history = (_hostedSessionConfig?.history || [])
-    .filter(item => item && item.content)
-    .slice(-(HOSTED_CONTEXT_MAX || 100))
-  const compacted = []
-  history.forEach(item => {
-    const role = normalizeHostedRole(item.role)
-    const content = String(item.content || '').trim()
-    if (!content) return
-    const prev = compacted[compacted.length - 1]
-    if (prev && prev.role === role && prev.rawRole === (item.role || role) && prev.content === content) return
-    compacted.push({ role, rawRole: item.role || role, content })
-  })
-  const systemPrompt = resolveHostedSystemPrompt()
-  const mapped = compacted.map(item => ({
-    role: item.role,
-    content: `[${String(item.rawRole || item.role).toUpperCase()}] ${item.content}`,
-  }))
-  if (systemPrompt) mapped.unshift({ role: 'system', content: systemPrompt })
-  return mapped
+  return buildHostedMessagesCore(
+    _hostedSessionConfig?.history || [],
+    resolveHostedSystemPrompt(),
+    HOSTED_CONTEXT_MAX || 100,
+  )
 }
 
 function detectStopFromText(text) {
@@ -3115,15 +3090,7 @@ async function ensureHostedHistorySeeded(sessionKey, limit = 200, force = false)
     const result = await wsClient.chatHistory(key, limit)
     const messages = result?.messages || []
     const deduped = dedupeHistory(messages)
-    const seeded = deduped
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .slice(-(HOSTED_CONTEXT_MAX || 100))
-      .map(m => ({
-        role: m.role,
-        content: m.text || '',
-        ts: m.timestamp || Date.now(),
-      }))
-      .filter(m => m.content)
+    const seeded = buildSeededHostedHistory(deduped, HOSTED_CONTEXT_MAX || 100)
     if (seeded.length) {
       const remoteLastTs = seeded.reduce((max, item) => Math.max(max, Number(item.ts || 0)), 0)
       const localHistory = Array.isArray(_hostedSessionConfig.history) ? _hostedSessionConfig.history : []

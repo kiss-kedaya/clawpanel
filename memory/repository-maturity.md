@@ -24,6 +24,8 @@
 - `applyHistoryResult(...)` 开始复用 apply-service，history apply 路径继续摆脱页面内联状态判断。
 - 新增 `src/lib/hosted-runtime-service.js`，抽离 hosted runtime 的断线暂停、重连恢复、目标哈希与自动触发前状态切换。
 - `pauseHostedForDisconnect(...)`、`resumeHostedFromReconnect(...)`、`maybeTriggerHostedRun(...)` 开始复用 hosted runtime helper，hosted 状态机从页面层继续剥离。
+- 新增 `src/lib/hosted-history-service.js`，抽离 hosted target 捕获、history entry 写入、message 构建与 remote seed 映射。
+- `shouldCaptureHostedTarget(...)`、`pushHostedHistoryEntry(...)`、`buildHostedMessages(...)`、`ensureHostedHistorySeeded(...)` 开始复用 hosted history helper，hosted history 路径持续脱离页面文件。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

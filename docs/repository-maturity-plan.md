@@ -125,6 +125,8 @@ scripts/
 14. `applyHistoryResult(...)` 开始复用 apply-service，页面层继续从“状态更新 + 渲染执行”向“编排 + 注入依赖”收口。
 15. 新增 `src/lib/hosted-runtime-service.js`，抽离 hosted runtime 的断线暂停、重连恢复、目标哈希与自动触发前状态切换规则。
 16. `pauseHostedForDisconnect(...)`、`resumeHostedFromReconnect(...)`、`maybeTriggerHostedRun(...)` 开始复用 hosted runtime helper，chat 页面内联状态机噪音继续下降。
+17. 新增 `src/lib/hosted-history-service.js`，抽离 hosted target 捕获判定、history entry 写入、hosted message 构建与 remote seed 映射。
+18. `shouldCaptureHostedTarget(...)`、`pushHostedHistoryEntry(...)`、`buildHostedMessages(...)`、`ensureHostedHistorySeeded(...)` 开始复用 hosted history helper，hosted 领域边界进一步清晰。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
