@@ -12,6 +12,8 @@
 - `src/pages/chat.js` 改为消费 hosted-agent 模块，降低页面内联业务规则密度。
 - 删除 chat 自动滚动并禁用 chat 虚拟滚动，去掉隐式滚动接管链。
 - 统一 hosted 状态文案、系统提示持久化与状态展示反馈。
+- 新增 `src/lib/history-domain.js`，抽离 history payload 归一化、history hash、entry key、最大时间戳等纯领域规则。
+- `src/pages/chat.js` 改为消费 history-domain 模块，开始把历史处理从页面层往 domain 层迁移。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

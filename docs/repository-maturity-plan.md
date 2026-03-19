@@ -113,6 +113,8 @@ scripts/
 2. `src/pages/chat.js` 改为消费 hosted-agent 模块，而不是继续内联所有 hosted 领域逻辑。
 3. 彻底禁用 chat 页虚拟滚动，去掉其对滚动位置的隐式接管。
 4. 统一 hosted 状态展示与系统反馈文案。
+5. 新增 `src/lib/history-domain.js`，抽离 history payload 归一化、history hash、entry key、最大时间戳计算等纯规则。
+6. `src/pages/chat.js` 开始消费 history-domain 模块，页面层继续向“渲染与编排”收口。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
