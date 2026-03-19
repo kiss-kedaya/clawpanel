@@ -93,6 +93,7 @@ import {
   mountAssistantRetryBar,
 } from '../lib/assistant-request-lifecycle.js'
 import { runAssistantResponse } from '../lib/assistant-response-runner.js'
+import { prepareAssistantRunContext } from '../lib/assistant-run-context.js'
 import { renderAssistantSettingsModal, renderAssistantKnowledgeList, updateAssistantTitleFromSettings } from './assistant-settings.js'
 
 // ── 常量 ──
@@ -2820,18 +2821,18 @@ async function retryAIResponse(session) {
   session.messages.push(aiMsg)
 
   const { requestId, requestController } = createAssistantRequestContext(session.id, nextRequestId, patchRequestState)
-  if (_currentSessionId === session.id) {
-    if (_sendBtn) _sendBtn.innerHTML = stopIcon()
-    startStreamRefresh(session.id)
-  }
-  renderSessionList()
-
-  if (_currentSessionId === session.id) renderMessages()
-  const aiBubbles = _currentSessionId === session.id ? _messagesEl?.querySelectorAll('.ast-msg-bubble-ai') : null
-  const lastBubble = aiBubbles?.[aiBubbles.length - 1]
-  if (lastBubble) lastBubble.innerHTML = '<span class="ast-typing">重试中...</span>'
-
-  const toolsEnabled = getEnabledTools().length > 0
+  const { lastBubble, toolsEnabled } = prepareAssistantRunContext({
+    session,
+    currentSessionId: _currentSessionId,
+    messagesEl: _messagesEl,
+    renderMessages,
+    renderSessionList,
+    sendBtn: _sendBtn,
+    stopIcon,
+    startStreamRefresh,
+    getEnabledTools,
+    typingText: '重试中...',
+  })
 
   try {
     await runAssistantResponse({
