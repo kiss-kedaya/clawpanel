@@ -63,6 +63,11 @@ import {
   renderAssistantToolBlocks as renderAssistantToolBlocksHtml,
   resolveAssistantAskUserAnswer,
 } from '../lib/assistant-tool-ui.js'
+import {
+  createAssistantToolHistoryEntry,
+  finalizeAssistantToolHistoryEntry,
+  withAssistantWaitingStatus,
+} from '../lib/assistant-tool-orchestrator.js'
 import { renderAssistantSettingsModal, renderAssistantKnowledgeList, updateAssistantTitleFromSettings } from './assistant-settings.js'
 
 // ── 常量 ──
@@ -1833,29 +1838,20 @@ async function callAIWithTools(sessionId, messages, onStatus, onToolProgress, si
   const adapters = {
     soulCache: _soulCache,
     knowledgeBase: OPENCLAW_KB,
-    confirm: async (text) => {
-      if (sessionId) setSessionStatus(sessionId, 'waiting')
-      const result = await showConfirm(text)
-      if (sessionId && getStreaming(sessionId)) setSessionStatus(sessionId, 'streaming')
-      return result
-    },
-    askUser: async (args) => {
-      if (sessionId) setSessionStatus(sessionId, 'waiting')
-      const result = await showAskUserCard({ ...(args || {}), sessionId })
-      if (sessionId && getStreaming(sessionId)) setSessionStatus(sessionId, 'streaming')
-      return result
-    },
+    confirm: async (text) => withAssistantWaitingStatus(sessionId, {
+      setSessionStatus,
+      getStreaming,
+    }, () => showConfirm(text)),
+    askUser: async (args) => withAssistantWaitingStatus(sessionId, {
+      setSessionStatus,
+      getStreaming,
+    }, () => showAskUserCard({ ...(args || {}), sessionId })),
     execTool: async ({ name, args }) => {
-      const entry = { name, args, result: null, approved: true, pending: true }
+      const entry = createAssistantToolHistoryEntry(name, args)
       toolHistory.push(entry)
       if (typeof onToolProgress === 'function') onToolProgress(toolHistory)
       const execResult = await executeToolWithSafety(name, args, { function: { name, arguments: JSON.stringify(args || {}) } }, sessionId)
-      const last = toolHistory[toolHistory.length - 1]
-      if (last) {
-        last.result = execResult.result
-        last.approved = execResult.approved
-        last.pending = false
-      }
+      finalizeAssistantToolHistoryEntry(entry, execResult)
       if (typeof onToolProgress === 'function') onToolProgress(toolHistory)
       return execResult.result
     },
