@@ -26,6 +26,8 @@
 - `pauseHostedForDisconnect(...)`、`resumeHostedFromReconnect(...)`、`maybeTriggerHostedRun(...)` 开始复用 hosted runtime helper，hosted 状态机从页面层继续剥离。
 - 新增 `src/lib/hosted-history-service.js`，抽离 hosted target 捕获、history entry 写入、message 构建与 remote seed 映射。
 - `shouldCaptureHostedTarget(...)`、`pushHostedHistoryEntry(...)`、`buildHostedMessages(...)`、`ensureHostedHistorySeeded(...)` 开始复用 hosted history helper，hosted history 路径持续脱离页面文件。
+- 新增 `src/lib/hosted-step-service.js`，抽离 hosted step 的启动校验、开始运行、模板错误、成功收尾、自停与失败重试状态切换。
+- `runHostedAgentStep(...)` 开始复用 hosted step helper，hosted execution/orchestration 继续从页面层剥离。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

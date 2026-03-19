@@ -42,6 +42,16 @@ import {
   shouldCaptureHostedTarget as shouldCaptureHostedTargetCore,
 } from '../lib/hosted-history-service.js'
 import {
+  applyHostedSelfStop,
+  applyHostedStepFailure,
+  applyHostedStepSuccess,
+  applyHostedTemplateError,
+  beginHostedStep,
+  getHostedStepDelay,
+  markHostedGenerating,
+  validateHostedStepStart,
+} from '../lib/hosted-step-service.js'
+import {
   buildHistoryEntryKey,
   buildHistoryHash,
   extractHistoryMessages,
@@ -3132,49 +3142,31 @@ async function runHostedAgentStep() {
     if (!_hostedSessionConfig) return
   }
   if (_hostedBusy || !_hostedSessionConfig.enabled) return
-  const prompt = (_hostedSessionConfig.prompt || '').trim()
-  if (!prompt) return
   const boundKey = getHostedBoundSessionKey()
-  if (!wsClient.gatewayReady || !boundKey) {
-    _hostedRuntime.status = HOSTED_STATUS.PAUSED
-    _hostedRuntime.lastError = 'Gateway 未就绪或 sessionKey 缺失'
-    _hostedRuntime.lastAction = 'paused'
+  const start = validateHostedStepStart(_hostedSessionConfig, _hostedRuntime, wsClient.gatewayReady, boundKey)
+  if (!start.ok) {
     persistHostedRuntime()
     updateHostedBadge()
-    appendHostedOutput(`需要人工介入: Gateway 未就绪或 sessionKey 缺失${formatHostedSummary()}`)
+    if (start.reason === 'gateway') {
+      appendHostedOutput(`需要人工介入: Gateway 未就绪或 sessionKey 缺失${formatHostedSummary()}`)
+    } else if (start.reason === 'retry-limit') {
+      appendHostedOutput(`需要人工介入: 连续错误超过阈值${formatHostedSummary()}`)
+    }
     return
   }
-  if (_hostedRuntime.errorCount >= _hostedSessionConfig.retryLimit) {
-    _hostedRuntime.status = HOSTED_STATUS.ERROR
-    persistHostedRuntime()
-    updateHostedBadge()
-    appendHostedOutput(`需要人工介入: 连续错误超过阈值${formatHostedSummary()}`)
-    return
-  }
-  if (_hostedRuntime.stepCount >= _hostedSessionConfig.maxSteps) {
-    _hostedRuntime.status = HOSTED_STATUS.IDLE
-    _hostedRuntime.lastAction = ''
-    persistHostedRuntime()
-    updateHostedBadge()
-    return
-  }
+
   _hostedBusy = true
-  _hostedRuntime.pending = true
-  _hostedRuntime.status = HOSTED_STATUS.RUNNING
-  _hostedRuntime.lastRunAt = Date.now()
-  _hostedRuntime.lastRunId = uuid()
-  _hostedRuntime.lastAction = ''
-  _currentRunId = _hostedRuntime.lastRunId
+  _currentRunId = beginHostedStep(_hostedRuntime, uuid)
   persistHostedRuntime()
   updateHostedBadge()
 
-  const delay = _hostedSessionConfig.stepDelayMs || HOSTED_DEFAULTS.stepDelayMs
+  const delay = getHostedStepDelay(_hostedSessionConfig)
   if (delay > 0) {
     await new Promise(r => setTimeout(r, delay))
   }
 
   try {
-    _hostedRuntime.lastAction = 'generating-reply'
+    markHostedGenerating(_hostedRuntime)
     persistHostedRuntime()
     updateHostedBadge()
     const messages = buildHostedMessages()
@@ -3182,11 +3174,7 @@ async function runHostedAgentStep() {
     const resultText = result?.text || ''
     const parsed = parseHostedTemplate(resultText)
     if (!parsed) {
-      _hostedRuntime.errorCount = (_hostedRuntime.errorCount || 0) + 1
-      _hostedRuntime.lastError = '托管 Agent 输出未符合模板'
-      _hostedRuntime.pending = false
-      _hostedRuntime.status = HOSTED_STATUS.ERROR
-      _hostedRuntime.lastAction = 'error'
+      applyHostedTemplateError(_hostedRuntime)
       persistHostedRuntime()
       updateHostedBadge()
       updateHostedInputLock()
@@ -3194,23 +3182,18 @@ async function runHostedAgentStep() {
       return
     }
 
-    _hostedRuntime.stepCount += 1
-    _hostedRuntime.errorCount = 0
-    _hostedRuntime.lastError = ''
+    applyHostedStepSuccess(_hostedRuntime)
 
     const rendered = renderHostedTemplate(parsed)
     pushHostedHistoryEntry('developer', rendered, Date.now())
 
     appendHostedOutput(`${rendered}${formatHostedSummary()}`)
 
-    _hostedRuntime.status = HOSTED_STATUS.WAITING
-    _hostedRuntime.pending = false
     persistHostedRuntime()
     updateHostedBadge()
 
     if (_hostedSessionConfig.stopPolicy === 'self' && detectStopFromText(rendered)) {
-      _hostedRuntime.status = HOSTED_STATUS.IDLE
-      _hostedRuntime.lastAction = 'stopped'
+      applyHostedSelfStop(_hostedRuntime)
       persistHostedRuntime()
       updateHostedBadge()
       if (_hostedRuntime.lastRunId && _hostedLastCompletionRunId !== _hostedRuntime.lastRunId) {
@@ -3219,11 +3202,9 @@ async function runHostedAgentStep() {
       }
     }
   } catch (e) {
-    _hostedRuntime.errorCount = (_hostedRuntime.errorCount || 0) + 1
     _hostedRuntime.lastError = e.message || String(e)
-    _hostedRuntime.pending = false
-    if (_hostedRuntime.errorCount >= _hostedSessionConfig.retryLimit) {
-      _hostedRuntime.status = HOSTED_STATUS.ERROR
+    const failure = applyHostedStepFailure(_hostedRuntime, _hostedSessionConfig.retryLimit)
+    if (failure.terminal) {
       updateHostedBadge()
       persistHostedRuntime()
       appendHostedOutput(`需要人工介入: 连续错误超过阈值${formatHostedSummary()}`)
@@ -3231,11 +3212,11 @@ async function runHostedAgentStep() {
     }
     persistHostedRuntime()
     updateHostedBadge()
-    const delay = _hostedSessionConfig.stepDelayMs || HOSTED_DEFAULTS.stepDelayMs
+    const retryDelay = getHostedStepDelay(_hostedSessionConfig)
     setTimeout(() => {
       _hostedBusy = false
       runHostedAgentStepForSession(getHostedBoundSessionKey())
-    }, delay)
+    }, retryDelay)
     return
   } finally {
     _hostedBusy = false
