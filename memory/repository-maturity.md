@@ -73,6 +73,9 @@
 - 新增 `src/lib/skills-catalog.js` 作为 Skills 数据轻量缓存层，统一负责 `skillsList` 结果缓存、TTL、失效与摘要统计，减少 Dashboard / Skills 重复加载成本。
 - Dashboard 总览卡已把 `MCP 工具` 正式切换为 `Skills`，显示真实 Skills 总数与可用/缺依赖摘要，不再从 `readMcpConfig()` 推导这个卡片数字。
 - `src/pages/skills.js` 已开始复用 skills catalog cache：优先渲染缓存结果、后台刷新；安装依赖 / 安装 Skill / 卸载 / 手动刷新时统一失效缓存并强制重载，统计摘要现包含 blocked 数量。
+- `src/components/sidebar.js` 已新增分组折叠态记忆：各导航分组可单独展开/折叠，状态持久化到 localStorage，并保持桌面侧边栏整体折叠模式兼容。
+- Sidebar icon 已收一版：`dashboard` / `services` / `skills` 图标已重做，分组标题切换器改为自定义按钮结构，并在 `src/style/layout.css` 补齐样式避免原生按钮观感。
+- 公网访问分层表单主入口已确认在 `src/pages/settings.js` 的 `cloudflared` 区块；下一轮直接从 `loadCloudflared(...)` / `handleCloudflaredStart(...)` 下手。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。
