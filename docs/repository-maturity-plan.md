@@ -1,0 +1,124 @@
+# Repository Maturity Plan
+
+## 当前问题总览
+
+### 技术栈与结构现状
+- 前端：Vanilla JS + Vite，页面集中在 `src/pages`
+- 桌面端：Tauri v2，Rust 命令在 `src-tauri/src`
+- Web/Headless 适配：`scripts/dev-api.js` + `scripts/serve.js`
+- 测试：Vitest（存在测试，但无 lint、无类型检查脚本）
+- 包管理：npm + package-lock
+
+### 审计结论摘要
+1. **页面文件过大**
+   - `src/pages/chat.js` 仍是最大热点文件，承担路由页、状态机、托管 Agent、历史处理、会话管理、消息渲染、输入锁定等多重职责。
+   - `src/pages/assistant.js` 同样偏大，页面状态、交互、配置管理混杂。
+2. **前后端边界不够清晰**
+   - `src/lib/tauri-api.js` 既承担命令调用、缓存、Web fallback，又让页面直接理解后端命令名。
+   - `scripts/dev-api.js` 体量很大，既做 API 中间件，又做业务逻辑、配置读写、命令执行与适配。
+3. **页面层承担过多业务逻辑**
+   - `chat.js` 中存在大量 DTO 解析、history 去重、hosted response 解析、状态转换逻辑。
+   - UI 层直接关心 Gateway event payload 与消息结构细节。
+4. **副作用散落**
+   - 页面内直接读写 localStorage、调用 API、更新 DOM、持久化运行态，缺少统一 service / adapter 边界。
+5. **性能与体验风险并存**
+   - 大文件导致维护成本高，回归风险高。
+   - 页面层状态过多，调试困难。
+   - 构建存在 Vite dynamic/static import warning。
+   - chat / assistant 这类高频交互页面容易出现状态不同步、滚动、去重、重连边界问题。
+
+## 目标架构原则
+- **简洁**：少而清晰的模块边界，避免花哨分层。
+- **模块化**：把可稳定复用的业务规则从页面剥离。
+- **低耦合**：UI 只消费 view-model / service，不直接拼底层后端细节。
+- **高可维护**：页面负责展示与交互编排，domain/service 负责规则，adapter 负责数据转换。
+- **渐进式重构**：优先高收益低风险拆分，不做全量推倒。
+
+## 推荐目录结构
+
+```text
+src/
+  components/            # 通用 UI 组件
+  lib/
+    api/                 # API 调用封装（后续可迁移）
+    adapters/            # 后端 DTO -> 前端 view model
+    domain/              # 纯业务规则、状态转换、解析逻辑
+    hosted-agent.js      # 已落地的第一步：托管 Agent 常量/解析/提示词
+  pages/
+    chat.js              # 页面装配层，继续瘦身
+    assistant.js         # 页面装配层，继续瘦身
+  style/
+    ...
+
+src-tauri/
+  src/
+    commands/            # Rust command handlers
+    models/              # Rust DTO / types
+    utils.rs             # 基础工具
+
+scripts/
+  dev-api.js             # Web/headless API bridge（后续建议拆分）
+  serve.js               # headless server 启动入口
+```
+
+## 前后端解耦策略
+1. **页面不直接解释后端原始响应**
+   - 新增 adapter/domain 层，负责把 Gateway/Tauri/dev-api 返回结构转换成页面需要的数据。
+2. **`tauri-api.js` 逐步变成 transport 层**
+   - 只负责请求、缓存、错误包装，不承担页面业务判断。
+3. **`dev-api.js` 分步拆分**
+   - 拆成 route middleware + command handlers + config helpers，避免单文件承担全部头部逻辑。
+4. **Hosted / chat / assistant 规则独立出页面**
+   - 先抽纯函数与常量，再抽状态转换逻辑，最后再抽 service。
+
+## 性能优化策略
+1. 减少巨型页面文件中的重复逻辑与重复解析。
+2. 统一消息/history/hosted 解析路径，降低重复计算。
+3. 避免在 UI 层直接遍历和重组原始 payload。
+4. 后续治理 Vite dynamic/static import warning，降低包体和 chunk 边界混乱。
+5. 高风险页面（chat / assistant）优先做“逻辑抽离”，减少每次修改带来的全文件回归风险。
+
+## 用户体验优化策略
+1. 统一加载态、错误态、空态文案来源。
+2. 统一 hosted 状态文案与系统气泡策略，避免不同区域说法不一致。
+3. 页面内交互规则尽量单点定义，例如：锁定输入、暂停/恢复、错误恢复。
+4. 不稳定体验问题优先用“删复杂逻辑”解决，而不是继续叠补丁。
+
+## 分阶段实施计划
+
+### P0（立即处理，高收益低风险）
+- 拆出 `chat.js` 中纯业务规则：hosted constants、prompt、response parse、instruction extract、action label。
+- 让 chat 页面不再承载所有 hosted 规则细节。
+- 删除高维护成本且不稳定的自动滚动/虚拟滚动路径。
+- 统一 hosted 状态文案与系统反馈。
+
+### P1（下一阶段）
+- 继续拆分 `chat.js`
+  - history/domain
+  - hosted runtime/service
+  - session list / event adapter
+- 拆分 `assistant.js` 中配置、状态、渲染、工具调用路径。
+- 给 `tauri-api.js` 引入更清晰的 command adapter/view-model adapter。
+- 为关键领域（chat / assistant / hosted）补充更有针对性的测试。
+
+### P2（成熟化收尾）
+- 拆分 `scripts/dev-api.js` 为更清晰的路由/处理器结构。
+- 梳理 Rust command / JS adapter 的 DTO 边界。
+- 补 lint、类型检查或等价静态校验流程。
+- 治理 Vite chunk warning 与 import 边界。
+
+## 已完成的第一阶段改造
+1. 将托管 Agent 的核心常量、固定提示词、解析逻辑、动作文案抽离到：
+   - `src/lib/hosted-agent.js`
+2. `src/pages/chat.js` 改为消费 hosted-agent 模块，而不是继续内联所有 hosted 领域逻辑。
+3. 彻底禁用 chat 页虚拟滚动，去掉其对滚动位置的隐式接管。
+4. 统一 hosted 状态展示与系统反馈文案。
+
+## 风险与回滚建议
+- 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
+- 风险：`dev-api.js` 仍是单点复杂模块，后续拆分需分批进行。
+- 回滚策略：
+  1. 每阶段重构前建 checkpoint commit
+  2. 单主题提交，不混入无关样式或功能
+  3. 每阶段都执行 `npm run build` 与 `npm test`
+  4. 历史重写前始终先建 backup 分支
