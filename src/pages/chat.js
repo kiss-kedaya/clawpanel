@@ -1891,7 +1891,7 @@ function applyHistoryResult(result, hasExisting, sessionKey) {
   })
   if (hasOmittedImages) appendOmittedImagesNotice({ appendSystemMessage })
   saveMessages(toStoredHistoryMessages(result.messages, sessionKey, extractContent, uuid))
-  scrollToBottom(true)
+  scrollToBottom(!hasExisting)
 }
 
 async function loadHistory() {

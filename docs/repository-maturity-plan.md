@@ -167,6 +167,8 @@ scripts/
 56. `chat.js` 开始修正心跳历史刷新与托管绑定兜底：`scrollToBottom(...)` 改为 near-bottom 策略，Hosted 绑定会话优先基于已启用的托管会话解析。
 57. Hosted Agent 管理 UI 开始从开关切换改为按钮式管理：移除“启用托管 Agent”开关文案，统一通过“启动托管 / 暂停 / 停止 / 保存配置”按钮管理。
 58. `src/lib/hosted-agent.js` 的固定提示词改为简约指引风格，减少长篇规划和冗余输出，强调短句、执行导向和简明用户回复。
+59. `chat.history` 刷新链路继续收紧：全量历史应用在已有消息时不再强制 `scrollToBottom(true)`，改为 only-on-first-load 策略，降低心跳刷新导致的异常滚动。
+60. Hosted 错投链路继续修正：`createAskUserBubble(...)` 与 `commitHostedUserReply(...)` 默认优先使用 `getHostedBoundSessionKey()`，且非当前 UI 会话时不再把 optimistic 用户消息误插入当前会话 DOM。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
