@@ -92,6 +92,7 @@ import {
   finalizeAssistantRequestLifecycle,
   mountAssistantRetryBar,
 } from '../lib/assistant-request-lifecycle.js'
+import { runAssistantResponse } from '../lib/assistant-response-runner.js'
 import { renderAssistantSettingsModal, renderAssistantKnowledgeList, updateAssistantTitleFromSettings } from './assistant-settings.js'
 
 // ── 常量 ──
@@ -2833,47 +2834,30 @@ async function retryAIResponse(session) {
   const toolsEnabled = getEnabledTools().length > 0
 
   try {
-    if (toolsEnabled) {
-      const aiMsgContainers = _messagesEl?.querySelectorAll('.ast-msg-ai')
-      const lastContainer = aiMsgContainers?.[aiMsgContainers.length - 1]
-
-      const result = await callAIWithTools(session.id, contextMessages,
-        (status) => {
-          if (!isActiveRequest(session.id, requestId)) return
-          if (lastBubble) lastBubble.innerHTML = `<span class="ast-typing">${escHtml(status)}</span>`
-        },
-        (history) => {
-          if (!isActiveRequest(session.id, requestId)) return
-          aiMsg.toolHistory = history
-          throttledSave()
-          if (!lastContainer) return
-          const toolHtml = renderToolBlocks(history)
-          const bubble = lastContainer.querySelector('.ast-msg-bubble-ai')
-          lastContainer.innerHTML = toolHtml + (bubble ? bubble.outerHTML : '')
-          if (_messagesEl) _messagesEl.scrollTop = _messagesEl.scrollHeight
-        },
-        requestController.signal
-      )
-      if (!isActiveRequest(session.id, requestId)) return
-      aiMsg.content = result.content
-      if (result.toolHistory.length > 0) aiMsg.toolHistory = result.toolHistory
-      if (_currentSessionId === session.id) renderMessages()
-    } else {
-      await callAI(session.id, contextMessages, (chunk) => {
-        if (!isActiveRequest(session.id, requestId)) return
-        _lastRenderTime = appendAssistantStreamChunk({
-          aiMsg,
-          chunk,
-          throttledSave,
-          lastBubble,
-          renderMarkdown,
-          messagesEl: _messagesEl,
-          lastRenderTime: _lastRenderTime,
-        })
-      }, requestController.signal)
-      if (!isActiveRequest(session.id, requestId)) return
-      finalizeAssistantStreamBubble(lastBubble, aiMsg.content, renderMarkdown)
-    }
+    await runAssistantResponse({
+      toolsEnabled,
+      session,
+      contextMessages,
+      requestId,
+      requestController,
+      aiMsg,
+      lastBubble,
+      messagesEl: _messagesEl,
+      currentSessionId: _currentSessionId,
+      callAIWithTools,
+      callAI,
+      isActiveRequest,
+      renderMessages,
+      renderToolBlocks,
+      renderMarkdown,
+      escHtml,
+      throttledSave,
+      updateAssistantToolProgress,
+      appendAssistantStreamChunk,
+      finalizeAssistantStreamBubble,
+      lastRenderTime: _lastRenderTime,
+      onLastRenderTime: (value) => { _lastRenderTime = value },
+    })
   } catch (err) {
     if (!isActiveRequest(session.id, requestId) && err?.name !== 'AbortError') return
     if (err.name === 'AbortError') {

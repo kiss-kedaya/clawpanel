@@ -159,6 +159,8 @@ scripts/
 48. `assistant.js` 开始复用 assistant streaming service helper，发送 / 重试流程中的重复流式渲染逻辑继续从页面文件中剥离。
 49. 新增 `src/lib/assistant-request-lifecycle.js`，抽离 retry bar 挂载与请求 finally 收尾逻辑。
 50. `assistant.js` 开始复用 assistant request lifecycle helper，发送 / 重试流程中的错误恢复与最终清理逻辑继续从页面文件中收口。
+51. 新增 `src/lib/assistant-response-runner.js`，抽离 tool 模式与普通流式模式的响应执行主体。
+52. `assistant.js` 开始复用 assistant response runner helper，send / retry 两条主路径中的重复响应执行逻辑继续从页面文件中剥离。
 
 ## 风险与回滚建议
 - 风险：`chat.js` 仍然较大，后续继续拆分时容易影响事件时序。
