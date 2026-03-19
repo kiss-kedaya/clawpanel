@@ -64,6 +64,8 @@
 - `assistant.js` 开始复用 assistant run context helper，assistant send / retry 两条主路径中的重复启动壳开始从页面层剥离。
 - 第一批关键体验修复已开始落地：assistant 设置入口按钮改为明确“助手设置”语义并提升点击优先级，assistant 流式输出 / 工具进度 / 后台刷新改为 near-bottom 自动跟随策略。
 - `chat.js` 开始修正心跳历史刷新与托管绑定兜底：`scrollToBottom(...)` 改为 near-bottom 策略，Hosted 绑定会话解析优先参考已启用的托管会话，降低切换会话后的错投概率。
+- Hosted Agent 管理 UI 开始从开关切换改为按钮式管理：移除“启用托管 Agent”开关文案，统一通过“启动托管 / 暂停 / 停止 / 保存配置”按钮管理。
+- `src/lib/hosted-agent.js` 的固定提示词已改为简约指引风格，目标是让托管层回复更短、更像执行指引而不是输出大段内容。
 
 ## 后续建议
 - 继续拆 `src/pages/chat.js`：history/domain、hosted runtime/service、session event adapter。

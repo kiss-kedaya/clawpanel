@@ -505,7 +505,7 @@ function bindEvents(page) {
     _hostedCloseBtn.addEventListener('click', () => hideHostedPanel())
   }
   if (_hostedSaveBtn) {
-    _hostedSaveBtn.addEventListener('click', () => saveHostedConfig())
+    _hostedSaveBtn.addEventListener('click', () => saveHostedConfig({ enable: !_hostedSessionConfig?.enabled ? true : undefined }))
   }
   if (_hostedPauseBtn) {
     _hostedPauseBtn.addEventListener('click', () => pauseHostedAgent())
@@ -2895,11 +2895,13 @@ function syncHostedStatusBubble(label) {
 function renderHostedPanel() {
   if (!_hostedPanelEl || !_hostedSessionConfig) return
   if (_hostedPromptEl) _hostedPromptEl.value = _hostedSessionConfig.prompt || ''
-  if (_hostedEnableEl) _hostedEnableEl.checked = !!_hostedSessionConfig.enabled
   const boundEl = _hostedPanelEl.querySelector('#hosted-agent-bound')
   if (boundEl) boundEl.textContent = `绑定会话：${_hostedSessionConfig.boundSessionKey || '未知'}`
   if (_hostedMaxStepsEl) _hostedMaxStepsEl.value = _hostedSessionConfig.maxSteps || HOSTED_DEFAULTS.maxSteps
   if (_hostedContextLimitEl) _hostedContextLimitEl.value = _hostedSessionConfig.contextTokenLimit || HOSTED_DEFAULTS.contextTokenLimit
+  if (_hostedSaveBtn) _hostedSaveBtn.textContent = _hostedSessionConfig.enabled ? '保存配置' : '启动托管'
+  if (_hostedPauseBtn) _hostedPauseBtn.disabled = !_hostedSessionConfig.enabled
+  if (_hostedStopBtn) _hostedStopBtn.disabled = !_hostedSessionConfig.enabled
   const statusEl = _hostedPanelEl.querySelector('#hosted-agent-status')
   if (statusEl) {
     let msg = '状态正常'
